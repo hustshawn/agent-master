@@ -12,7 +12,7 @@ private struct NoResumeAgent: AgentKind {
 
 final class SessionRestoreTests: XCTestCase {
     private var root: URL!
-    private let agents: [any AgentKind] = [ClaudeCodeAgent(locate: { _ in nil }), NoResumeAgent()]
+    private let agents: [any AgentKind] = [ClaudeCodeAgent(locate: { _ in nil }, transcriptExists: { _ in true }), NoResumeAgent()]
 
     override func setUp() {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("am-restore-\(UUID().uuidString.prefix(8))")
@@ -26,6 +26,7 @@ final class SessionRestoreTests: XCTestCase {
         var state = SessionState()
         state.status = status
         state.claudeSessionId = claudeId
+        state.transcriptPath = claudeId.map { "/fake/\($0).jsonl" }
         return state
     }
 

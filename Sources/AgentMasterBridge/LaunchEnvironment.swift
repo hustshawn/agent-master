@@ -65,7 +65,9 @@ public enum LaunchEnvironment {
         return env
     }
 
-    /// Like Process, but the child leads a new process group so a timeout can kill everything it started.
+    /// Like Process, but the child leads a new session (and so a new process group) so a timeout can kill
+    /// everything it started. A new session, not just a new group: an interactive zsh left in the caller's
+    /// session opens the controlling tty from a background group and is stopped by SIGTTOU/SIGTTIN.
     private static func spawnInOwnProcessGroup(_ path: String, arguments: [String], stdout: Int32) -> pid_t? {
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
@@ -77,9 +79,8 @@ public enum LaunchEnvironment {
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
         defer { posix_spawnattr_destroy(&attributes) }
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT
                                                      | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
-        posix_spawnattr_setpgroup(&attributes, 0)
         var signals = sigset_t()
         sigfillset(&signals)
         posix_spawnattr_setsigdefault(&attributes, &signals)

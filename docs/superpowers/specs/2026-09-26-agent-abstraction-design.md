@@ -128,12 +128,13 @@ public struct AgentPreferenceStore {
 ## 3. 界面
 
 Settings 窗口（⌘,）用 `Form(.grouped)`，每个 agent 一个 Section，Section 标题是 `displayName`。
-Section 里的控件由通用视图 `AgentOptionsView(agent:options:store:)` 按 `AgentOption` 渲染：
+Section 里的控件由通用视图 `AgentOptionsView(title:options:preferences:isForcedOn:onSet:)` 按 `AgentOption` 渲染。
+这个视图放在 AgentMasterUI，而 UI 不能依赖 Bridge，所以存储交给调用方（App 层的 SettingsView），用 `onSet` 闭包回写：
 
 - **choice**：一个 Picker，选项依次是：
   - `Follow <displayName> settings`（对应空值）
   - 分隔线
-  - 各个 `AgentChoice`：显示 `label`；有 `detail` 时在后面用 secondary 样式显示 detail
+  - 各个 `AgentChoice`：显示 `label`；有 `detail` 时显示为 `label — detail`（macOS 的菜单项只能显示纯文本，没法做 secondary 样式）
   - 允许自定义时，最后一项是 `Custom…`
   - 选中 `Custom…`，或者存的值不在列表里时，Picker 下面出现一个 TextField，编辑后立即保存。
 - **toggle**：一个 Toggle。Claude 专有规则：`permissionMode == bypassPermissions` 时，`allowBypass` 显示为开启且不可操作。

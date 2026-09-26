@@ -9,6 +9,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// A lone `Window` scene quits the app when closed, which would kill every running claude session.
+    /// Keep running; the window is reopened from the Dock or the Window menu.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { model.shutdown() }
     }

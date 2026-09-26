@@ -22,6 +22,10 @@ public struct AppPaths {
         supportDirectory.appendingPathComponent("agentmaster.sock").path
     }
 
+    public var openSessionsURL: URL {
+        supportDirectory.appendingPathComponent("open-sessions.json")
+    }
+
     public func prepare() throws {
         try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: supportDirectory.path)

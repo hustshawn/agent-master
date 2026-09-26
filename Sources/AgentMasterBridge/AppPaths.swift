@@ -43,6 +43,12 @@ public struct AppPaths {
         try? FileManager.default.removeItem(at: sessionDirectory(sessionId))
     }
 
+    /// Removes the entire sessions directory (all per-session settings dirs) and ignores errors.
+    /// Called at launch before any session starts to clean up dirs left over from previous runs.
+    public func removeAllSessionDirectories() {
+        try? FileManager.default.removeItem(at: supportDirectory.appendingPathComponent("sessions"))
+    }
+
     private func sessionDirectory(_ sessionId: String) -> URL {
         supportDirectory.appendingPathComponent("sessions").appendingPathComponent(sessionId)
     }

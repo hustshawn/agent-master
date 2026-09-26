@@ -48,6 +48,15 @@ final class AppPathsTests: XCTestCase {
         paths().removeSessionDirectory(sessionId: "S1")   // already gone: no-op
     }
 
+    func testRemoveAllSessionDirectoriesDeletesBothAndIsIdempotent() throws {
+        let s1 = try paths().writeSettings(Data("{}".utf8), sessionId: "S1")
+        let s2 = try paths().writeSettings(Data("{}".utf8), sessionId: "S2")
+        paths().removeAllSessionDirectories()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: s1.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: s2.path))
+        paths().removeAllSessionDirectories()   // already gone: no crash
+    }
+
     func testOpenSessionsFileLivesInTheSupportDirectory() {
         XCTAssertEqual(paths().openSessionsURL.path, root.appendingPathComponent("Support Dir/open-sessions.json").path)
     }

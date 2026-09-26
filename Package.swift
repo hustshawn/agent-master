@@ -21,5 +21,7 @@ let package = Package(
         .testTarget(name: "AgentMasterBridgeTests", dependencies: ["AgentMasterBridge"],
                     resources: [.copy("Fixtures")]),
         .testTarget(name: "TerminalKitTests", dependencies: ["TerminalKit"]),
+        .target(name: "AgentMasterUI", dependencies: ["AgentMasterCore"]),
+        .testTarget(name: "AgentMasterUITests", dependencies: ["AgentMasterUI"]),
     ]
 )

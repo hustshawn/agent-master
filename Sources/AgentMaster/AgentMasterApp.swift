@@ -50,7 +50,7 @@ struct AgentMasterApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsView(model: delegate.model)
                 .preferredColorScheme(.dark)
         }
     }

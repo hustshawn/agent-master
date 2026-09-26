@@ -1,30 +1,36 @@
 import SwiftUI
+import AgentMasterCore
 import AgentMasterBridge
+import AgentMasterUI
 
-/// Defaults for new sessions. Stored in UserDefaults and read by `LaunchPreferences` at launch time.
+/// Defaults for new sessions, one section per agent. Values live in UserDefaults via AgentPreferenceStore.
 struct SettingsView: View {
-    /// "" follows Claude Code's own settings.
-    @AppStorage(LaunchPreferences.modeKey) private var mode = ""
-    @AppStorage(LaunchPreferences.allowBypassKey) private var allowBypass = true
+    let model: AppModel
+    @State private var preferences: [String: AgentPreferences] = [:]
+    private let store = AgentPreferenceStore(defaults: .standard)
 
     var body: some View {
         Form {
-            Picker("Default permission mode", selection: $mode) {
-                Text("Follow Claude Code settings").tag("")
-                Divider()
-                ForEach(PermissionMode.allCases, id: \.rawValue) { mode in
-                    Text(mode == .manual ? "manual (default)" : mode.rawValue).tag(mode.rawValue)
-                }
+            ForEach(AgentRegistry.all, id: \.id) { agent in
+                let prefs = preferences[agent.id] ?? store.preferences(for: agent.id)
+                AgentOptionsView(
+                    title: agent.displayName,
+                    options: agent.options(environment: model.capturedEnvironment ?? [:]),
+                    preferences: prefs,
+                    isForcedOn: { agent.isForcedOn(optionId: $0, preferences: prefs) },
+                    onSet: { optionId, value in
+                        store.set(value, agentId: agent.id, optionId: optionId)
+                        preferences[agent.id] = store.preferences(for: agent.id)
+                    })
             }
-            Toggle("Allow switching to bypass permissions in a session",
-                   isOn: mode == PermissionMode.bypassPermissions.rawValue ? .constant(true) : $allowBypass)
-                .disabled(mode == PermissionMode.bypassPermissions.rawValue)
-            Text("Applies to new sessions. Running sessions keep their mode; use Shift+Tab to change it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Section {
+                Text("Applies to new sessions. Running sessions keep their settings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 460)
+        .frame(width: 560)
         .fixedSize(horizontal: false, vertical: true)
     }
 }

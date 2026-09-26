@@ -61,6 +61,25 @@ final class HookShimTests: XCTestCase {
         XCTAssertEqual(connection.sent, [])
     }
 
+    func testLargePayloadToAppThatNeverReadsReturnsPromptly() throws {
+        let path = "/tmp/am-\(UUID().uuidString.prefix(8)).sock"
+        let listener = try UnixSocketListener(path: path)   // alive but never accepts or reads
+        defer { listener.close() }
+        let big = String(repeating: "x", count: 256 * 1024)
+        let input = Data(#"{"hook_event_name":"PostToolUse","tool_name":"Read","tool_response":"\#(big)"}"#.utf8)
+        let done = expectation(description: "shim returned")
+        var output: String? = "unset"
+        let started = Date()
+        Thread.detachNewThread {
+            output = HookShim.run(mode: .hook, input: input, environment: self.env,
+                                  connector: UnixWireConnector(path: path))
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 3.5)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3.5)
+        XCTAssertNil(output)
+    }
+
     func testStatusLineIsForwardedAndAlwaysPrinted() {
         let json = #"{"model":{"display_name":"Haiku 4.5"},"cwd":"/tmp/p"}"#
         let payload = try! JSONValue.parse(Data(json.utf8))

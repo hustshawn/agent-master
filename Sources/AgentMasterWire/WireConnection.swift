@@ -1,7 +1,8 @@
 import Foundation
 
 public protocol WireConnection: AnyObject {
-    func send(_ message: WireMessage) throws
+    /// `line` is a message already encoded with `WireCodec.encodeLine`.
+    func send(_ line: Data) throws
     func receiveReply(timeout: TimeInterval) throws -> WireReply
     func close()
 }
@@ -29,8 +30,8 @@ final class UnixWireConnection: WireConnection {
         self.socket = socket
     }
 
-    func send(_ message: WireMessage) throws {
-        try socket.write(WireCodec.encodeLine(message))
+    func send(_ line: Data) throws {
+        try socket.write(line)
     }
 
     func receiveReply(timeout: TimeInterval) throws -> WireReply {

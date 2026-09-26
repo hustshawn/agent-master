@@ -7,7 +7,7 @@ final class FakeConnection: WireConnection {
     var receiveTimeout: TimeInterval?
     var closed = false
 
-    func send(_ message: WireMessage) throws { sent.append(message) }
+    func send(_ line: Data) throws { sent.append(try WireCodec.decode(WireMessage.self, line: line.dropLast())) }
 
     func receiveReply(timeout: TimeInterval) throws -> WireReply {
         receiveTimeout = timeout

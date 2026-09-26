@@ -81,6 +81,33 @@ final class UnixSocketTests: XCTestCase {
         XCTAssertThrowsError(try (0..<64).forEach { _ in try server.write(Data(repeating: 0x41, count: 65536)) })
     }
 
+    func testWriteToListenerThatNeverAcceptsTimesOut() throws {
+        let listener = try UnixSocketListener(path: path)
+        defer { listener.close() }
+        let client = try UnixSocket.connect(path: path)
+        let done = expectation(description: "write returned")
+        var result: Error?
+        let started = Date()
+        Thread.detachNewThread {
+            do { try client.write(Data(repeating: 0x41, count: 256 * 1024)) } catch { result = error }
+            done.fulfill()
+        }
+        wait(for: [done], timeout: UnixSocket.sendTimeout + 1.5)
+        XCTAssertLessThan(Date().timeIntervalSince(started), UnixSocket.sendTimeout + 1.5)
+        XCTAssertEqual(result as? UnixSocketError, .timeout)
+    }
+
+    func testCloseDoesNotWaitForAStuckWrite() throws {
+        let listener = try UnixSocketListener(path: path)
+        defer { listener.close() }
+        let client = try UnixSocket.connect(path: path)
+        Thread.detachNewThread { try? client.write(Data(repeating: 0x41, count: 256 * 1024)) }
+        Thread.sleep(forTimeInterval: 0.2)   // let the writer fill the buffer and block
+        let started = Date()
+        client.close()
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.5)
+    }
+
     func testConnectWithoutListenerFails() {
         XCTAssertThrowsError(try UnixSocket.connect(path: path))
     }

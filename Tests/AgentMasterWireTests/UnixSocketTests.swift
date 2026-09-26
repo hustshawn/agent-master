@@ -39,6 +39,29 @@ final class UnixSocketTests: XCTestCase {
         XCTAssertNoThrow(try UnixSocket.connect(path: path))
     }
 
+    func testStaleSocketFromACrashedRunIsReplaced() throws {
+        // Bound and then closed without unlink: nobody is listening behind the file any more.
+        var address = try makeSocketAddress(path)
+        let stale = socket(AF_UNIX, SOCK_STREAM, 0)
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(stale, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        XCTAssertEqual(bound, 0)
+        Darwin.close(stale)
+        let listener = try UnixSocketListener(path: path)
+        defer { listener.close() }
+        XCTAssertNoThrow(try UnixSocket.connect(path: path))
+    }
+
+    func testSecondListenerDoesNotTakeOverALiveSocket() throws {
+        let first = try UnixSocketListener(path: path)
+        defer { first.close() }
+        XCTAssertThrowsError(try UnixSocketListener(path: path)) { XCTAssertEqual($0 as? UnixSocketError, .addressInUse) }
+        let client = try UnixSocket.connect(path: path)
+        XCTAssertNotNil(try first.accept(timeout: 1))   // the first instance still owns the path
+        withExtendedLifetime(client) {}
+    }
+
     func testAcceptReturnsNilOnTimeout() throws {
         let listener = try UnixSocketListener(path: path)
         defer { listener.close() }

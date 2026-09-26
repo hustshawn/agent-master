@@ -5,6 +5,7 @@ public enum UnixSocketError: Error, Equatable {
     case system(String, Int32)
     case timeout
     case closed
+    case addressInUse   // another live listener (a running instance) owns the path
 }
 
 func makeSocketAddress(_ path: String) throws -> sockaddr_un {
@@ -140,6 +141,11 @@ public final class UnixSocketListener {
 
     public init(path: String) throws {
         let address = try makeSocketAddress(path)
+        // A live listener means another instance is running: taking over its path would cut its sessions off.
+        if let probe = try? UnixSocket.connect(path: path) {
+            probe.close()
+            throw UnixSocketError.addressInUse
+        }
         unlink(path)   // a crashed previous run may have left the file behind
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw UnixSocketError.system("socket", errno) }
@@ -148,7 +154,12 @@ public final class UnixSocketListener {
             Darwin.close(fd)
             throw UnixSocketError.system("bind", code)
         }
-        chmod(path, 0o600)
+        guard chmod(path, 0o600) == 0 else {
+            let code = errno
+            Darwin.close(fd)
+            unlink(path)
+            throw UnixSocketError.system("chmod", code)
+        }
         guard listen(fd, 64) == 0 else {
             let code = errno
             Darwin.close(fd)

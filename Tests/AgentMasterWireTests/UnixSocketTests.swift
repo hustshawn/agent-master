@@ -72,9 +72,10 @@ final class UnixSocketTests: XCTestCase {
         let listener = try UnixSocketListener(path: path)
         defer { listener.close() }
         let client = try UnixSocket.connect(path: path)
-        _ = client
-        let server = try XCTUnwrap(try listener.accept(timeout: 1))
-        XCTAssertThrowsError(try server.readLine(timeout: 0.2)) { XCTAssertEqual($0 as? UnixSocketError, .timeout) }
+        try withExtendedLifetime(client) {   // an early release would surface as .closed, not .timeout
+            let server = try XCTUnwrap(try listener.accept(timeout: 1))
+            XCTAssertThrowsError(try server.readLine(timeout: 0.2)) { XCTAssertEqual($0 as? UnixSocketError, .timeout) }
+        }
     }
 
     func testPeerCloseSurfacesAsClosed() throws {

@@ -48,6 +48,10 @@ final class AppPathsTests: XCTestCase {
         paths().removeSessionDirectory(sessionId: "S1")   // already gone: no-op
     }
 
+    func testOpenSessionsFileLivesInTheSupportDirectory() {
+        XCTAssertEqual(paths().openSessionsURL.path, root.appendingPathComponent("Support Dir/open-sessions.json").path)
+    }
+
     func testStandardSocketPathFitsInSunPath() {
         XCTAssertLessThan(AppPaths.standard.socketPath.utf8.count, 104)
         XCTAssertTrue(AppPaths.standard.socketPath.hasSuffix("Application Support/AgentMaster/agentmaster.sock"))

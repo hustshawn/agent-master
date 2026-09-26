@@ -2,6 +2,9 @@ import Foundation
 
 public enum SessionStatus: Equatable, Sendable {
     case starting, idle, running, needsAttention, ended
+
+    /// Closing kills claude mid-turn; ask first. The transcript survives either way (`claude --resume`).
+    public var needsCloseConfirmation: Bool { self == .running || self == .needsAttention }
 }
 
 /// Everything the panels show for one session. Pure value type; only `apply` mutates it.

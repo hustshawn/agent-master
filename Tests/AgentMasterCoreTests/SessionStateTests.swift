@@ -113,4 +113,12 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(state.usage, usage)
         XCTAssertEqual(state.permissionMode, "plan")
     }
+
+    func testOnlyWorkingSessionsNeedCloseConfirmation() {
+        XCTAssertTrue(SessionStatus.running.needsCloseConfirmation)
+        XCTAssertTrue(SessionStatus.needsAttention.needsCloseConfirmation)
+        XCTAssertFalse(SessionStatus.starting.needsCloseConfirmation)
+        XCTAssertFalse(SessionStatus.idle.needsCloseConfirmation)
+        XCTAssertFalse(SessionStatus.ended.needsCloseConfirmation)
+    }
 }

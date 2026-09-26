@@ -39,6 +39,15 @@ final class AppPathsTests: XCTestCase {
         XCTAssertNil(paths().hookExecutable(isExecutable: { _ in false }))
     }
 
+    func testRemoveSessionDirectoryDeletesOnlyThatSession() throws {
+        let s1 = try paths().writeSettings(Data("{}".utf8), sessionId: "S1")
+        let s2 = try paths().writeSettings(Data("{}".utf8), sessionId: "S2")
+        paths().removeSessionDirectory(sessionId: "S1")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: s1.deletingLastPathComponent().path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: s2.path))
+        paths().removeSessionDirectory(sessionId: "S1")   // already gone: no-op
+    }
+
     func testStandardSocketPathFitsInSunPath() {
         XCTAssertLessThan(AppPaths.standard.socketPath.utf8.count, 104)
         XCTAssertTrue(AppPaths.standard.socketPath.hasSuffix("Application Support/AgentMaster/agentmaster.sock"))

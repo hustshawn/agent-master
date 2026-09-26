@@ -29,6 +29,8 @@ public enum MuseFont {
     public static let body = Font.system(size: 13, design: .monospaced)
     public static let small = Font.system(size: 11, design: .monospaced)
     public static let heading = Font.system(size: 11, weight: .bold, design: .monospaced)
+    public static let rowTitle = Font.system(size: 14, design: .monospaced)
+    public static let groupHeading = Font.system(size: 12, weight: .bold, design: .monospaced)
 }
 
 public struct HairLine: View {

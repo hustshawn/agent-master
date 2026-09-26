@@ -33,9 +33,25 @@ struct AgentMasterApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Session…") { delegate.model.chooseProjectAndStart() }
+                Button("New Session") { delegate.model.newSessionInCurrentProject() }
                     .keyboardShortcut("n")
+                Button("New Session in Folder…") { delegate.model.chooseProjectAndStart() }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
             }
+            CommandGroup(replacing: .saveItem) {
+                // In the main window ⌘W closes the selected session; elsewhere (Settings) it closes the window.
+                // SwiftUI autosaves the `Window(id: "main")` frame under the scene id.
+                Button("Close") {
+                    let inMain = NSApp.keyWindow?.frameAutosaveName == "main"
+                    if !(inMain && delegate.model.closeSelected()) { NSApp.keyWindow?.performClose(nil) }
+                }
+                .keyboardShortcut("w")
+            }
+        }
+
+        Settings {
+            SettingsView()
+                .preferredColorScheme(.dark)
         }
     }
 }

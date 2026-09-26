@@ -2,6 +2,7 @@
 
 - 日期：2026-09-26
 - 状态：已批准（2026-09-26）；实现计划见 `docs/superpowers/plans/2026-09-26-agent-master-m1-m2.md`
+- 后续设计：`2026-09-26-agent-abstraction-design.md`（预留 Agent 抽象，设置按 agent 划分）；决策记录见 `docs/adr/`
 - 调研资料：`docs/research/muse-replica-brief.md`、`docs/research/fact-check.md`
 
 ## 1. 背景与目标

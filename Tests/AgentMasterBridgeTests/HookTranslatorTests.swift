@@ -150,16 +150,16 @@ final class HookTranslatorTests: XCTestCase {
             ["hook_event_name": "SessionEnd", "session_id": "A", "reason": "clear"],
             ["hook_event_name": "SessionStart", "session_id": "B", "cwd": "/p", "source": "clear"],
             ["hook_event_name": "PostToolUse", "session_id": "B", "tool_name": "TaskCreate", "tool_use_id": "t2",
-             "tool_input": ["subject": "New"], "tool_response": ["task": ["id": "1", "subject": "New"]]],
+             "tool_input": ["subject": "New"], "tool_response": ["task": ["id": "2", "subject": "New"]]],
         ]
         let perPayload = payloads.map { translator.translate($0) }
         XCTAssertEqual(perPayload[2], [])
         XCTAssertEqual(perPayload[3], [.sessionStarted(claudeSessionId: "B", cwd: "/p", transcriptPath: nil)])
-        XCTAssertEqual(perPayload[4].first, .todosChanged([TodoItem(id: "1", subject: "New", status: .pending)]))
+        XCTAssertEqual(perPayload[4].first, .todosChanged([TodoItem(id: "2", subject: "New", status: .pending)]))
         perPayload.joined().forEach { state.apply($0) }
         XCTAssertEqual(state.status, .idle)
         XCTAssertEqual(state.claudeSessionId, "B")
-        XCTAssertEqual(state.todos, [TodoItem(id: "1", subject: "New", status: .pending)])
+        XCTAssertEqual(state.todos, [TodoItem(id: "2", subject: "New", status: .pending)])
     }
 
     func testOtherSessionEndReasonsEndTheSession() {

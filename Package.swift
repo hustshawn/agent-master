@@ -4,9 +4,13 @@ import PackageDescription
 let package = Package(
     name: "AgentMaster",
     platforms: [.macOS(.v14)],
+    products: [
+        .executable(name: "agentmaster-hook", targets: ["agentmaster-hook"]),
+    ],
     targets: [
         .target(name: "AgentMasterCore"),
         .target(name: "AgentMasterWire", dependencies: ["AgentMasterCore"]),
+        .executableTarget(name: "agentmaster-hook", dependencies: ["AgentMasterWire"]),
         .testTarget(name: "AgentMasterCoreTests", dependencies: ["AgentMasterCore"]),
         .testTarget(name: "AgentMasterWireTests", dependencies: ["AgentMasterWire"]),
     ]

@@ -49,6 +49,6 @@ final class SessionController: Identifiable {
 
     var row: SessionRowModel {
         SessionRowModel(id: id, projectPath: projectPath, title: title ?? "Session \(id.prefix(4))",
-                        status: state.status, createdAt: createdAt)
+                        subtitle: SessionSubtitle.text(for: state), status: state.status, createdAt: createdAt)
     }
 }

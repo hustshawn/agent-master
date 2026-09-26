@@ -4,6 +4,7 @@ import AgentMasterCore
 import AgentMasterWire
 import AgentMasterBridge
 import TerminalKit
+import AgentMasterUI
 
 enum AppError: LocalizedError {
     case claudeNotFound
@@ -25,13 +26,16 @@ final class AppModel {
     private(set) var sessions: [SessionController] = []
     var selectedId: String?
     var errorMessage: String?
+    private(set) var recentProjects: [String] = []
 
     @ObservationIgnored private let paths = AppPaths.standard
+    @ObservationIgnored private let recents = RecentProjects(defaults: .standard)
     @ObservationIgnored private var server: HookServer?
     @ObservationIgnored private var baseEnvironment: [String: String]?
     @ObservationIgnored private var environmentTask: Task<[String: String], Never>?
 
     init() {
+        recentProjects = recents.paths
         // The login shell can take seconds; start it now so the first session does not wait.
         environmentTask = Task.detached {
             LaunchEnvironment.captureLoginShell() ?? ProcessInfo.processInfo.environment
@@ -56,6 +60,16 @@ final class AppModel {
         sessions.first { $0.id == selectedId }
     }
 
+    /// ⌘N: another session next to the selected one; the folder picker only when nothing is open.
+    func newSessionInCurrentProject() {
+        guard let project = selected?.projectPath else { return chooseProjectAndStart() }
+        start(in: project)
+    }
+
+    func start(in projectPath: String) {
+        Task { await startSession(in: projectPath) }
+    }
+
     func chooseProjectAndStart() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -63,7 +77,7 @@ final class AppModel {
         panel.allowsMultipleSelection = false
         panel.prompt = "Start Session"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await startSession(in: url.path) }
+        start(in: url.path)
     }
 
     func startSession(in projectPath: String) async {
@@ -75,15 +89,43 @@ final class AppModel {
             let settings = try paths.writeSettings(SessionSettingsBuilder(hookExecutable: hook).data(), sessionId: id)
             let launch = TerminalLaunch(
                 executable: claude,
-                args: ["--settings", settings.path],
+                args: LaunchPreferences(defaults: .standard).claudeArguments(settingsPath: settings.path),
                 environment: LaunchEnvironment.sessionEnvironment(base: base, sessionId: id, socketPath: paths.socketPath),
                 currentDirectory: projectPath)
             let session = SessionController(id: id, projectPath: projectPath, launch: launch)
             sessions.append(session)
             selectedId = id
+            recents.record(projectPath)
+            recentProjects = recents.paths
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// ⌘W. Returns false when there is no session, so the window closes as usual.
+    func closeSelected() -> Bool {
+        guard let selectedId else { return false }
+        close(selectedId)
+        return true
+    }
+
+    func close(_ id: String) {
+        guard let session = sessions.first(where: { $0.id == id }) else { return }
+        if session.state.status.needsCloseConfirmation {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Close “\(session.row.title)”?"
+            alert.informativeText = "Claude is still working in \(session.projectName). The transcript is kept; continue it later with claude --resume."
+            alert.addButton(withTitle: "Close")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        let next = SessionGrouping.selectionAfterClosing(id, in: sessions.map(\.row))
+        sessions.removeAll { $0.id == id }
+        if selectedId == id { selectedId = next }
+        session.terminal.terminate()
+        // claude reads settings.json only at startup, so it can go as soon as the process is signalled.
+        paths.removeSessionDirectory(sessionId: id)
     }
 
     func shutdown() {

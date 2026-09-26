@@ -28,11 +28,19 @@ public struct AppPaths {
     }
 
     public func writeSettings(_ data: Data, sessionId: String) throws -> URL {
-        let directory = supportDirectory.appendingPathComponent("sessions").appendingPathComponent(sessionId)
+        let directory = sessionDirectory(sessionId)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("settings.json")
         try data.write(to: url, options: .atomic)
         return url
+    }
+
+    public func removeSessionDirectory(sessionId: String) {
+        try? FileManager.default.removeItem(at: sessionDirectory(sessionId))
+    }
+
+    private func sessionDirectory(_ sessionId: String) -> URL {
+        supportDirectory.appendingPathComponent("sessions").appendingPathComponent(sessionId)
     }
 
     /// `.app/Contents/Helpers/agentmaster-hook` when bundled; next to the executable under `swift run`.

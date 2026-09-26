@@ -1,7 +1,7 @@
 # AgentMaster 设计文档
 
 - 日期：2026-09-26
-- 状态：待审阅
+- 状态：已批准（2026-09-26）；实现计划见 `docs/superpowers/plans/2026-09-26-agent-master-m1-m2.md`
 - 调研资料：`docs/research/muse-replica-brief.md`、`docs/research/fact-check.md`
 
 ## 1. 背景与目标
@@ -87,7 +87,7 @@
   - 所有需要的 hook 事件 → HookShim；`PermissionRequest` 与 `PreToolUse(AskUserQuestion)` 的 `timeout` 设为 600；
   - statusLine → HookShim 的 `statusline` 子命令（既输出 Muse 式底栏，又把用量推送给 App）；
   - spinnerVerbs（Muse 文案）。
-- `--settings` 与用户自身 settings 叠加，不覆盖用户的 hooks / 插件（实现时需验证合并语义，见 §8）。
+- `--settings` 与用户自身 settings 叠加，不覆盖用户的 hooks / 插件（已验证，见 §8）。
 
 ### 4.2 HookShim
 
@@ -108,30 +108,34 @@
 
 ```swift
 enum SessionEvent {
-  case sessionStarted(claudeSessionId: String, cwd: String, transcriptPath: String)
+  case sessionStarted(claudeSessionId: String, cwd: String, transcriptPath: String?)
   case promptSubmitted(text: String)
   case toolStarted(ToolCall)
-  case toolFinished(ToolCall, ToolResult)          // success / failure, durationMs
-  case todosChanged([TodoItem])                   // 由 TaskCreate/TaskUpdate/TodoWrite 合成
-  case subagentStarted(agentId: String, description: String)
+  case toolFinished(toolUseId: String, outcome: ToolOutcome, durationMs: Int?)   // success / failure(message)
+  case fileChanged(FileChange)                     // 来自 Edit/MultiEdit/Write 的 structuredPatch
+  case todosChanged([TodoItem])                    // 由 TaskCreate/TaskUpdate/TodoWrite 合成
+  case subagentStarted(agentId: String, agentType: String)            // SubagentStart
+  case subagentDescribed(agentId: String, description: String, agentType: String?)  // Agent 工具的 PostToolUse
   case subagentFinished(agentId: String)
-  case approvalRequested(ApprovalRequest)          // 需要回复
-  case questionAsked(QuestionRequest)              // 需要回复
+  case permissionModeChanged(String)
   case usageUpdated(Usage)                         // 来自 statusline
-  case needsAttention(message: String)             // Notification
+  case needsAttention(message: String)             // PermissionRequest / 非 idle 的 Notification
   case turnFinished(lastMessage: String?)          // Stop
-  case sessionEnded
+  case sessionEnded(reason: String?)               // SessionEnd（reason == "clear" 时不发出）
 }
-enum ToolKind { case read, search, edit(path: String, diff: Diff), write(path: String),
-                shell(command: String, description: String?), web, agent, other(name: String) }
+enum ToolKind { case read(path: String), search(pattern: String), edit(path: String), write(path: String),
+                shell(command: String, description: String?), web(target: String),
+                agent(description: String), other(name: String) }
+// M3 增加：approvalRequested(ApprovalRequest)、questionAsked(QuestionRequest)（需要回复）
 ```
 
 - 映射表（集中一处，Claude Code 改名只改这里）：
   - `Read`、`Grep`、`Glob` → read / search
-  - `Edit`、`MultiEdit` → edit（diff 由 old_string/new_string 计算）；`Write` → write（与写入前文件内容对比计算 diff，前内容在 PreToolUse 时读取）
+  - `Edit`、`MultiEdit` → edit；`Write` → write。diff 直接取自 PostToolUse `tool_response.structuredPatch`（hunk：`oldStart/oldLines/newStart/newLines/lines`）；新建文件（`type: "create"`）的 patch 为空，用 `content` 生成全新增 hunk
   - `Bash` → shell
   - `TaskCreate`、`TaskUpdate`、`TodoWrite` → todosChanged（Translator 维护每会话 todo 状态）
-  - `Agent` / `Task` → subagentStarted（`agentId` 取自 PostToolUse 的 `tool_response`）；`SubagentStop` → subagentFinished
+  - `SubagentStart` → subagentStarted；`Agent` / `Task` 的 PostToolUse → subagentDescribed（`tool_response.agentId` + `description`）；`SubagentStop` → subagentFinished
+  - `/clear`：Claude Code 先发 `SessionEnd(reason: clear)`，再发新 `session_id` 的 `SessionStart`；前者丢弃，后者重置面板
   - 未知工具 → `other(name)`；未知事件/字段 → 记录日志并忽略
 
 ### 4.4 TranscriptReader
@@ -225,29 +229,34 @@ Would you like to run the following command?
 
 ## 7. 工程结构
 
+仓库根目录即一个 SwiftPM 包（`Package.swift`），各层为独立 target：
+
 ```
 agent-master/
-├─ App/                  SwiftUI App 入口、窗口、命令面板、设置
-├─ Packages/
-│  ├─ Core/              SessionEvent、领域模型、Theme token（纯 Swift）
-│  ├─ Bridge/            SessionManager、HookServer、Translator、TranscriptReader
-│  ├─ HookShim/          可执行 target，打包至 .app/Contents/Helpers
-│  ├─ UI/                侧边栏、右侧面板、浮层、DiffView
-│  └─ TerminalKit/       SwiftTerm 封装（TerminalView 协议，可替换为 libghostty）
-├─ Tests/Fixtures/       真实会话录制的 hook 事件 JSON
+├─ Package.swift
+├─ Sources/
+│  ├─ AgentMasterCore/     SessionEvent、领域模型、SessionState reducer、Theme token（纯 Swift）
+│  ├─ AgentMasterWire/     NDJSON 协议、Unix socket、HookShim 逻辑、会话 settings 生成
+│  ├─ agentmaster-hook/    HookShim 可执行 target，打包至 .app/Contents/Helpers
+│  ├─ AgentMasterBridge/   Translator、HookServer、启动环境、claude 定位、路径
+│  ├─ TerminalKit/         SwiftTerm 封装（可替换为 libghostty）
+│  ├─ AgentMasterUI/       侧边栏、右侧面板、DiffView（M3 起加浮层）
+│  └─ AgentMaster/         App 入口、窗口、会话控制
+├─ Tests/                  各 target 单测；AgentMasterBridgeTests/Fixtures 为真实会话录制的 hook JSON
+├─ scripts/                bundle.sh（组装 .app）、smoke.py（真实 claude 端到端冒烟）
 └─ docs/
 ```
 
 - 依赖方向：UI → Core ← Bridge；UI 不接触 Claude Code 格式。
-- 第三方：SwiftTerm；diff 使用自实现 Myers 算法（无依赖）；语法高亮在 M2 选型（候选 Splash、tree-sitter 绑定）。
+- 第三方：仅 SwiftTerm（exact 1.18.0）；diff 直接使用 Claude Code 提供的 structuredPatch，无需自实现 diff 算法；语法高亮推迟到 M5 选型（候选 Splash、tree-sitter 绑定）。
 - 最低 macOS 14；本地签名，内部分发。
 
 ## 8. 待实现时验证的点
 
-1. `--settings` 与用户全局/项目 settings 的合并语义（hooks 是否叠加而非覆盖）。
+1. ~~`--settings` 与用户全局/项目 settings 的合并语义~~ ✅ 已验证：hooks 叠加，用户自己的 hooks 照常触发。
 2. PermissionRequest 挂起期间终端内是否仍显示原生审批框；"始终允许"的规则写入方式。
 3. `customTheme` 能否用于让 Claude Code TUI 本身使用 Muse 配色（字符串存在于二进制中，未验证用法）。
-4. statusLine JSON 中可用的用量字段。
+4. ~~statusLine JSON 中可用的用量字段~~ ✅ 已验证：`model.display_name`、`workspace.current_dir`、`context_window.{total_input_tokens,total_output_tokens,used_percentage}`、`cost.total_cost_usd`。
 
 ## 9. 测试策略
 
@@ -264,6 +273,6 @@ agent-master/
 | M2 | 桥接打通 | HookShim ↔ socket ↔ Translator，TODO / AGENTS / CHANGES / USAGE 实时更新 |
 | M3 | 原生审批与提问 | 两个浮层 + 系统通知，§6 回退场景全部测试通过 |
 | M4 | 多会话与历史 | 侧边栏、状态字形、恢复会话、⌘K |
-| M5 | 打磨 | spinner/扫光动效、statusline 底栏与 spinnerVerbs、customTheme 调研、设置页 |
+| M5 | 打磨 | spinner/扫光动效、statusline 底栏与 spinnerVerbs、diff 语法高亮、customTheme 调研、设置页 |
 
 M1–M3 构成可用 MVP。Mobile 端在 M5 稳定后另立项目，届时将 Bridge 事件以 WebSocket 暴露。

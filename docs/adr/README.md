@@ -5,7 +5,7 @@
 
 | 编号 | 标题 | 状态 |
 |---|---|---|
-| [0001](0001-default-permission-mode-in-settings.md) | 在 Settings 里设置新会话的默认权限模式 | 已接受；实现将被 0004 重构 |
+| [0001](0001-default-permission-mode-in-settings.md) | 在 Settings 里设置新会话的默认权限模式 | 已接受；实现已由 0004 重构（LaunchPreferences → ClaudeCodeAgent） |
 | [0002](0002-new-session-without-folder-picker.md) | 新建会话不必经过文件夹选择窗口 | 已接受 |
 | [0003](0003-closing-sessions.md) | 关闭会话的行为 | 已接受 |
 | [0004](0004-agent-abstraction.md) | 预留 Agent 抽象，设置按 agent 划分 | 已接受 |

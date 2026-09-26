@@ -25,6 +25,10 @@ private func withSockaddr<T>(_ address: sockaddr_un, _ body: (UnsafePointer<sock
 }
 
 public enum UnixSocket {
+    /// Upper bound on one blocked `write`. The app can be alive but not reading (paused in a debugger, wedged);
+    /// the shim must then give up instead of hanging Claude Code on a payload larger than the socket buffer.
+    public static let sendTimeout: TimeInterval = 2
+
     public static func connect(path: String) throws -> UnixSocketConnection {
         let address = try makeSocketAddress(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -42,7 +46,8 @@ public enum UnixSocket {
 /// One connected stream. `write`/`close` may be called from any thread; `readLine` from one reader.
 public final class UnixSocketConnection {
     private let fd: Int32
-    private let lock = NSLock()
+    private let lock = NSLock()        // guards isClosed
+    private let writeLock = NSLock()   // held across a whole write; the fd is only released under it
     private var isClosed = false
     private var buffer = LineBuffer()
     private var lines: [Data] = []
@@ -51,6 +56,8 @@ public final class UnixSocketConnection {
         self.fd = fd
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        var timeout = timeval(tv_sec: Int(UnixSocket.sendTimeout), tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     }
 
     deinit {
@@ -58,17 +65,26 @@ public final class UnixSocketConnection {
     }
 
     public func write(_ data: Data) throws {
+        writeLock.lock()
+        defer { writeLock.unlock() }
+        // Checked while holding writeLock, which close() needs before releasing the fd,
+        // so a late writer can never hit a closed-and-reused fd.
         lock.lock()
-        defer { lock.unlock() }
-        // Checked under the lock so a late writer can never hit a closed-and-reused fd.
-        guard !isClosed else { throw UnixSocketError.closed }
+        let closed = isClosed
+        lock.unlock()
+        guard !closed else { throw UnixSocketError.closed }
         try data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             guard let base = raw.baseAddress else { return }
+            // SO_SNDTIMEO bounds each call; a timed-out call that moved some bytes returns a short count,
+            // so the deadline also bounds the whole write to about one sendTimeout.
+            let deadline = Date().addingTimeInterval(UnixSocket.sendTimeout)
             var offset = 0
             while offset < raw.count {
+                if offset > 0 && Date() >= deadline { throw UnixSocketError.timeout }
                 let written = Darwin.write(fd, base + offset, raw.count - offset)
                 if written < 0 {
                     if errno == EINTR { continue }
+                    if errno == EAGAIN || errno == EWOULDBLOCK { throw UnixSocketError.timeout }   // SO_SNDTIMEO
                     throw UnixSocketError.system("write", errno)
                 }
                 offset += written
@@ -104,10 +120,15 @@ public final class UnixSocketConnection {
 
     public func close() {
         lock.lock()
-        defer { lock.unlock() }
-        guard !isClosed else { return }
+        guard !isClosed else { lock.unlock(); return }
         isClosed = true
+        // Wakes a write blocked in the kernel, so the writeLock below is released promptly.
+        // The fd is still open here: only this call, which won the isClosed flip, ever closes it.
+        shutdown(fd, SHUT_RDWR)
+        lock.unlock()
+        writeLock.lock()
         Darwin.close(fd)
+        writeLock.unlock()
     }
 }
 

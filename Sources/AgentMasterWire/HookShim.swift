@@ -35,9 +35,11 @@ public enum HookShim {
         let kind: WireKind = mode == .statusline ? .statusline : (isDecision(payload) ? .request : .event)
         let message = WireMessage(id: makeId(), sessionId: sessionId, kind: kind, payload: payload)
         do {
+            // Encode before connecting, so the server's short read deadline covers only the transfer.
+            let line = try WireCodec.encodeLine(message)
             let connection = try connector.connect()
             defer { connection.close() }
-            try connection.send(message)
+            try connection.send(line)
             guard kind == .request else { return fallback }
             let reply = try connection.receiveReply(timeout: decisionTimeout)
             return reply.id == message.id ? reply.output : nil

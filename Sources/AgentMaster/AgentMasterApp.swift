@@ -19,7 +19,9 @@ struct AgentMasterApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        WindowGroup {
+        // A single Window, not a WindowGroup: there is one terminal NSView per session, and a second
+        // window (tab bar "+", state restoration) would reparent it away from the first.
+        Window("AgentMaster", id: "main") {
             MainWindow(model: delegate.model)
                 .preferredColorScheme(.dark)
         }

@@ -6,19 +6,6 @@ import AgentMasterBridge
 import TerminalKit
 import AgentMasterUI
 
-enum AppError: LocalizedError {
-    case claudeNotFound
-    case hookHelperMissing
-
-    var errorDescription: String? {
-        switch self {
-        case .claudeNotFound:
-            return "Claude Code not found. Install it (~/.local/bin/claude) or set AGENTMASTER_CLAUDE_PATH."
-        case .hookHelperMissing:
-            return "agentmaster-hook is missing. Build with scripts/bundle.sh, or `swift build` so it sits next to the app binary."
-        }
-    }
-}
 
 @MainActor
 @Observable
@@ -29,9 +16,12 @@ final class AppModel {
     private(set) var recentProjects: [String] = []
 
     @ObservationIgnored private let paths = AppPaths.standard
+    /// The login shell's environment once captured; Settings resolves model aliases against it.
+    private(set) var capturedEnvironment: [String: String]?
+
     @ObservationIgnored private let recents = RecentProjects(defaults: .standard)
+    @ObservationIgnored private let preferenceStore = AgentPreferenceStore(defaults: .standard)
     @ObservationIgnored private var server: HookServer?
-    @ObservationIgnored private var baseEnvironment: [String: String]?
     @ObservationIgnored private var environmentTask: Task<[String: String], Never>?
 
     init() {
@@ -54,6 +44,7 @@ final class AppModel {
         } catch {
             errorMessage = "Could not start the hook server: \(error)"
         }
+        Task { _ = await environment() }
     }
 
     var selected: SessionController? {
@@ -80,25 +71,27 @@ final class AppModel {
         start(in: url.path)
     }
 
-    func startSession(in projectPath: String) async {
+    @discardableResult
+    func startSession(in projectPath: String, agent: any AgentKind = AgentRegistry.defaultAgent,
+                      resumeId: String? = nil) async -> String? {
         do {
             let base = await environment()
-            guard let claude = ClaudeLocator.locate(environment: base) else { throw AppError.claudeNotFound }
-            guard let hook = paths.hookExecutable() else { throw AppError.hookHelperMissing }
             let id = UUID().uuidString
-            let settings = try paths.writeSettings(SessionSettingsBuilder(hookExecutable: hook).data(), sessionId: id)
-            let launch = TerminalLaunch(
-                executable: claude,
-                args: LaunchPreferences(defaults: .standard).claudeArguments(settingsPath: settings.path),
-                environment: LaunchEnvironment.sessionEnvironment(base: base, sessionId: id, socketPath: paths.socketPath),
-                currentDirectory: projectPath)
-            let session = SessionController(id: id, projectPath: projectPath, launch: launch)
+            let launch = try agent.launch(AgentLaunchRequest(
+                sessionId: id, preferences: preferenceStore.preferences(for: agent.id),
+                environment: base, paths: paths, resumeId: resumeId))
+            let session = SessionController(
+                id: id, agentId: agent.id, projectPath: projectPath,
+                launch: TerminalLaunch(executable: launch.executable, args: launch.args,
+                                       environment: launch.environment, currentDirectory: projectPath))
             sessions.append(session)
             selectedId = id
             recents.record(projectPath)
             recentProjects = recents.paths
+            return id
         } catch {
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 
@@ -135,9 +128,9 @@ final class AppModel {
     }
 
     private func environment() async -> [String: String] {
-        if let baseEnvironment { return baseEnvironment }
+        if let capturedEnvironment { return capturedEnvironment }
         let captured = await environmentTask?.value ?? ProcessInfo.processInfo.environment
-        baseEnvironment = captured
+        capturedEnvironment = captured
         return captured
     }
 

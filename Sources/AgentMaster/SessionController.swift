@@ -10,6 +10,7 @@ import TerminalKit
 @Observable
 final class SessionController: Identifiable {
     let id: String
+    let agentId: String
     let projectPath: String
     let createdAt = Date()
     private(set) var state = SessionState()
@@ -17,8 +18,9 @@ final class SessionController: Identifiable {
     @ObservationIgnored let terminal: TerminalSession
     @ObservationIgnored private var translator = HookTranslator()
 
-    init(id: String, projectPath: String, launch: TerminalLaunch) {
+    init(id: String, agentId: String, projectPath: String, launch: TerminalLaunch) {
         self.id = id
+        self.agentId = agentId
         self.projectPath = projectPath
         terminal = TerminalSession(launch: launch)
         terminal.onExit = { [weak self] _ in

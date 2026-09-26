@@ -63,7 +63,8 @@ def visible(raw):
 
 
 def event_names(messages):
-    return [m["payload"].get("hook_event_name") for m in messages if m.get("kind") != "statusline"]
+    return [m.get("payload", {}).get("hook_event_name") or m.get("kind") or "?"
+            for m in messages if m.get("kind") != "statusline"]
 
 
 def main():
@@ -141,7 +142,7 @@ def main():
     finally:
         try:
             os.kill(pid, 9)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
         os.waitpid(pid, 0)
         app.server.close()
@@ -154,7 +155,7 @@ def main():
         failures.append(f"missing hook events: {sorted(missing)}")
     if not any(m.get("kind") == "statusline" for m in messages):
         failures.append("no statusline message")
-    posts = [m["payload"] for m in messages if m["payload"].get("hook_event_name") == "PostToolUse"]
+    posts = [m.get("payload", {}) for m in messages if m.get("payload", {}).get("hook_event_name") == "PostToolUse"]
     if not any(p.get("tool_name") == "TaskCreate" and (p.get("tool_response") or {}).get("task", {}).get("id")
                for p in posts):
         failures.append("TaskCreate PostToolUse without tool_response.task.id")
@@ -171,7 +172,10 @@ def main():
             f.write(screen)
         print(f"(scratch kept at {scratch}; last terminal output in screen.log)")
         sys.exit(1)
-    shutil.rmtree(scratch, ignore_errors=True)
+    try:
+        shutil.rmtree(scratch)
+    except OSError as error:
+        print(f"warning: could not remove scratch dir {scratch}: {error}")
     print("PASS")
 
 

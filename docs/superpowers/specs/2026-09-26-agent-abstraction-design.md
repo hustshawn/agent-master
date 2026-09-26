@@ -27,7 +27,7 @@
 
 - Settings 里的 Claude Code 分组可以选择默认模型、默认权限模式、是否允许切换到 bypass。模型别名旁边显示实际解析出的 ID。
 - 新会话的 claude 启动参数与设置一致（用 `ps` 核对），页头显示的模型与所选一致。
-- `AppModel` 里不再出现 Claude 专用的类型：`ClaudeLocator`、`SessionSettingsBuilder`、`LaunchEnvironment`、`HookShim`。
+- `AppModel` 里不再出现 Claude 专用的类型：`ClaudeLocator`、`SessionSettingsBuilder`、`LaunchEnvironment.sessionEnvironment`、`HookShim`。（`LaunchEnvironment.captureLoginShell()` 抓取的是与 agent 无关的登录 shell 环境，保留在 AppModel）
 - 现有行为不变：hook 注入、环境变量清理、ADR 0001–0003 的全部行为。
 
 ## 2. 类型

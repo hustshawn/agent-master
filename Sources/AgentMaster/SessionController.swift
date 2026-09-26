@@ -12,16 +12,20 @@ final class SessionController: Identifiable {
     let id: String
     let agentId: String
     let projectPath: String
+    /// The id this session was resumed with; kept in the journal until SessionStart reports the live one.
+    let resumeHint: String?
+    @ObservationIgnored var onStateChange: (() -> Void)?
     let createdAt = Date()
     private(set) var state = SessionState()
     private(set) var title: String?
     @ObservationIgnored let terminal: TerminalSession
     @ObservationIgnored private var translator = HookTranslator()
 
-    init(id: String, agentId: String, projectPath: String, launch: TerminalLaunch) {
+    init(id: String, agentId: String, projectPath: String, resumeHint: String? = nil, launch: TerminalLaunch) {
         self.id = id
         self.agentId = agentId
         self.projectPath = projectPath
+        self.resumeHint = resumeHint
         terminal = TerminalSession(launch: launch)
         terminal.onExit = { [weak self] _ in
             guard let self, self.state.status != .ended else { return }
@@ -43,6 +47,7 @@ final class SessionController: Identifiable {
     private func apply(_ events: [SessionEvent]) {
         let now = Date()
         for event in events { state.apply(event, at: now) }
+        if !events.isEmpty { onStateChange?() }
     }
 
     var projectName: String {

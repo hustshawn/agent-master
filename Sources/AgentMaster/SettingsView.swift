@@ -7,6 +7,7 @@ import AgentMasterUI
 struct SettingsView: View {
     let model: AppModel
     @State private var preferences: [String: AgentPreferences] = [:]
+    @AppStorage(GeneralSettings.restoreSessionsOnLaunchKey) private var restoreSessions = true
     private let store = AgentPreferenceStore(defaults: .standard)
 
     var body: some View {
@@ -22,6 +23,9 @@ struct SettingsView: View {
                         store.set(value, agentId: agent.id, optionId: optionId)
                         preferences[agent.id] = store.preferences(for: agent.id)
                     })
+            }
+            Section("General") {
+                Toggle("Restore sessions on launch", isOn: $restoreSessions)
             }
             Section {
                 Text("Applies to new sessions. Running sessions keep their settings.")

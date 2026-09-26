@@ -11,7 +11,10 @@ let package = Package(
         .target(name: "AgentMasterCore"),
         .target(name: "AgentMasterWire", dependencies: ["AgentMasterCore"]),
         .executableTarget(name: "agentmaster-hook", dependencies: ["AgentMasterWire"]),
+        .target(name: "AgentMasterBridge", dependencies: ["AgentMasterCore", "AgentMasterWire"]),
         .testTarget(name: "AgentMasterCoreTests", dependencies: ["AgentMasterCore"]),
         .testTarget(name: "AgentMasterWireTests", dependencies: ["AgentMasterWire"]),
+        .testTarget(name: "AgentMasterBridgeTests", dependencies: ["AgentMasterBridge"],
+                    resources: [.copy("Fixtures")]),
     ]
 )

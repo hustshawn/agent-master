@@ -10,8 +10,12 @@ import AgentMasterUI
 @MainActor
 @Observable
 final class AppModel {
-    private(set) var sessions: [SessionController] = []
-    var selectedId: String?
+    private(set) var sessions: [SessionController] = [] {
+        didSet { persistOpenSessions() }
+    }
+    var selectedId: String? {
+        didSet { persistOpenSessions() }
+    }
     var errorMessage: String?
     private(set) var recentProjects: [String] = []
 
@@ -21,6 +25,9 @@ final class AppModel {
 
     @ObservationIgnored private let recents = RecentProjects(defaults: .standard)
     @ObservationIgnored private let preferenceStore = AgentPreferenceStore(defaults: .standard)
+    @ObservationIgnored private let journal = OpenSessionJournal(fileURL: AppPaths.standard.openSessionsURL)
+    /// While relaunching the journal's sessions, do not overwrite it with the partial list.
+    @ObservationIgnored private var restoring = false
     @ObservationIgnored private var server: HookServer?
     @ObservationIgnored private var environmentTask: Task<[String: String], Never>?
 
@@ -44,7 +51,10 @@ final class AppModel {
         } catch {
             errorMessage = "Could not start the hook server: \(error)"
         }
-        Task { _ = await environment() }
+        Task {
+            _ = await environment()
+            await restoreOpenSessions()
+        }
     }
 
     var selected: SessionController? {
@@ -81,9 +91,10 @@ final class AppModel {
                 sessionId: id, preferences: preferenceStore.preferences(for: agent.id),
                 environment: base, paths: paths, resumeId: resumeId))
             let session = SessionController(
-                id: id, agentId: agent.id, projectPath: projectPath,
+                id: id, agentId: agent.id, projectPath: projectPath, resumeHint: resumeId,
                 launch: TerminalLaunch(executable: launch.executable, args: launch.args,
                                        environment: launch.environment, currentDirectory: projectPath))
+            session.onStateChange = { [weak self] in self?.persistOpenSessions() }
             sessions.append(session)
             selectedId = id
             recents.record(projectPath)
@@ -122,9 +133,39 @@ final class AppModel {
     }
 
     func shutdown() {
+        // Terminating below marks every session ended; the journal must keep what was open.
+        journal.freeze()
         server?.stop()
         server = nil
         sessions.forEach { $0.terminal.terminate() }
+    }
+
+    private func persistOpenSessions() {
+        guard !restoring else { return }
+        journal.save(RestorePlan.records(from: sessions.map {
+            OpenSessionSnapshot(agentId: $0.agentId, projectPath: $0.projectPath, createdAt: $0.createdAt,
+                                state: $0.state, selected: $0.id == selectedId, fallbackResumeId: $0.resumeHint)
+        }, agents: AgentRegistry.all))
+    }
+
+    private func restoreOpenSessions() async {
+        guard GeneralSettings.restoreSessionsOnLaunch(.standard) else { return }
+        let plan = RestorePlan.make(records: journal.load(), agents: AgentRegistry.all) { path in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }
+        guard !plan.isEmpty else { return }
+        restoring = true
+        var selected: String?
+        for record in plan {
+            guard let agent = AgentRegistry.agent(id: record.agentId),
+                  let id = await startSession(in: record.projectPath, agent: agent, resumeId: record.resumeId)
+            else { continue }
+            if record.selected { selected = id }
+        }
+        if let selected { selectedId = selected }
+        restoring = false
+        persistOpenSessions()
     }
 
     private func environment() async -> [String: String] {

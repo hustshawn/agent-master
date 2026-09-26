@@ -39,18 +39,11 @@ public enum LaunchEnvironment {
     /// launched from Finder do not get it. Returns nil if the shell fails or exceeds `timeout`.
     public static func captureLoginShell(shell: String = userShell, timeout: TimeInterval = 5) -> [String: String]? {
         let marker = "__AGENTMASTER_ENV_\(UUID().uuidString)__"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-l", "-i", "-c", "printf '%s' '\(marker)'; /usr/bin/env -0"]
-        process.standardInput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        let arguments = [shell, "-l", "-i", "-c", "printf '%s' '\(marker)'; /usr/bin/env -0"]
         let pipe = Pipe()
-        process.standardOutput = pipe
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
+        guard let pid = spawnInOwnProcessGroup(shell, arguments: arguments,
+                                               stdout: pipe.fileHandleForWriting.fileDescriptor) else { return nil }
+        try? pipe.fileHandleForWriting.close()   // only the shell's group holds the write end now
 
         let output = DataBox()
         let done = DispatchSemaphore(value: 0)
@@ -59,11 +52,50 @@ public enum LaunchEnvironment {
             done.signal()
         }
         guard done.wait(timeout: .now() + timeout) == .success else {
-            process.terminate()
+            // Interactive shells ignore SIGTERM, and a hung rc child keeps the pipe open: kill the whole group.
+            kill(-pid, SIGTERM)
+            Thread.sleep(forTimeInterval: 0.2)
+            kill(-pid, SIGKILL)
+            reap(pid)
+            _ = done.wait(timeout: .now() + 1)   // the reader sees EOF once the group is gone
             return nil
         }
+        reap(pid)
         guard let env = parseEnvDump(output.data, marker: marker), !env.isEmpty else { return nil }
         return env
+    }
+
+    /// Like Process, but the child leads a new process group so a timeout can kill everything it started.
+    private static func spawnInOwnProcessGroup(_ path: String, arguments: [String], stdout: Int32) -> pid_t? {
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        posix_spawn_file_actions_adddup2(&actions, stdout, 1)
+        posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
+
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT
+                                                     | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
+        posix_spawnattr_setpgroup(&attributes, 0)
+        var signals = sigset_t()
+        sigfillset(&signals)
+        posix_spawnattr_setsigdefault(&attributes, &signals)
+        sigemptyset(&signals)
+        posix_spawnattr_setsigmask(&attributes, &signals)
+
+        let argv = arguments.map { strdup($0) } + [nil]
+        defer { argv.forEach { free($0) } }
+        var pid: pid_t = 0
+        guard posix_spawn(&pid, path, &actions, &attributes, argv, environ) == 0 else { return nil }
+        return pid
+    }
+
+    private static func reap(_ pid: pid_t) {
+        var status: Int32 = 0
+        while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
     }
 
     public static var userShell: String {

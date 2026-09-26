@@ -8,6 +8,7 @@ public enum AgentChoiceSelection {
     public static let customTag = "\u{0}custom"
 
     public static func tag(for value: String?, choices: [AgentChoice], allowsCustom: Bool, customActive: Bool) -> String {
+        if allowsCustom && customActive { return customTag }
         if let value, choices.contains(where: { $0.value == value }) { return value }
         if allowsCustom && (value != nil || customActive) { return customTag }
         return followTag
@@ -77,7 +78,10 @@ public struct AgentOptionsView: View {
         if selection.wrappedValue == AgentChoiceSelection.customTag {
             TextField("Custom \(option.title.lowercased())", text: Binding(
                 get: { preferences.values[option.id] ?? "" },
-                set: { onSet(option.id, $0) }))
+                set: {
+                    customActive.insert(option.id)
+                    onSet(option.id, $0.isEmpty ? nil : $0)
+                }))
         }
     }
 

@@ -92,6 +92,7 @@ final class AgentMasterUITests: XCTestCase {
         XCTAssertEqual(tag("opus"), "opus")
         XCTAssertEqual(tag("us.anthropic.claude-opus-5-5[1m]"), AgentChoiceSelection.customTag, "unknown value shows as custom")
         XCTAssertEqual(tag(nil, active: true), AgentChoiceSelection.customTag, "custom picked but nothing typed yet")
+        XCTAssertEqual(tag("opus", active: true), AgentChoiceSelection.customTag, "known value while custom is active → customTag")
         XCTAssertEqual(tag("yolo", custom: false), AgentChoiceSelection.followTag, "no custom row: unknown value follows")
         XCTAssertNotEqual(AgentChoiceSelection.customTag, "custom", "cannot collide with a real value")
     }

@@ -97,10 +97,19 @@ final class ClaudeCodeAgentTests: XCTestCase {
     }
 
     func testResumeIdIsTheClaudeSessionId() {
+        let existing = ClaudeCodeAgent(transcriptExists: { _ in true })
+        let missing = ClaudeCodeAgent(transcriptExists: { _ in false })
         var state = SessionState()
-        XCTAssertNil(ClaudeCodeAgent().resumeId(from: state))
+        // No id → nil
+        XCTAssertNil(existing.resumeId(from: state))
+        // Id with no transcriptPath → nil
         state.claudeSessionId = "abc"
-        XCTAssertEqual(ClaudeCodeAgent().resumeId(from: state), "abc")
+        XCTAssertNil(existing.resumeId(from: state))
+        // Id with a transcriptPath the injected check says is missing → nil
+        state.transcriptPath = "/fake/abc.jsonl"
+        XCTAssertNil(missing.resumeId(from: state))
+        // Id with an existing transcript → the id
+        XCTAssertEqual(existing.resumeId(from: state), "abc")
         XCTAssertTrue(ClaudeCodeAgent().supportsResume)
     }
 

@@ -16,9 +16,12 @@ public struct ClaudeCodeAgent: AgentKind {
     public var supportsResume: Bool { true }
 
     private let locate: @Sendable ([String: String]) -> String?
+    private let transcriptExists: @Sendable (String) -> Bool
 
-    public init(locate: @escaping @Sendable ([String: String]) -> String? = { ClaudeLocator.locate(environment: $0) }) {
+    public init(locate: @escaping @Sendable ([String: String]) -> String? = { ClaudeLocator.locate(environment: $0) },
+                transcriptExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) {
         self.locate = locate
+        self.transcriptExists = transcriptExists
     }
 
     public func options(environment: [String: String]) -> [AgentOption] {
@@ -39,7 +42,10 @@ public struct ClaudeCodeAgent: AgentKind {
     }
 
     public func resumeId(from state: SessionState) -> String? {
-        state.claudeSessionId
+        guard let id = state.claudeSessionId,
+              let path = state.transcriptPath,
+              transcriptExists(path) else { return nil }
+        return id
     }
 
     public static func arguments(settingsPath: String, preferences: AgentPreferences, resumeId: String? = nil) -> [String] {

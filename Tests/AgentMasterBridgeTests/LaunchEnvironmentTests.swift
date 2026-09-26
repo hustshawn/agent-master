@@ -88,6 +88,28 @@ final class LaunchEnvironmentTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(start), 3)
     }
 
+    func testCaptureTimeoutKillsAShellThatIgnoresSIGTERMAndItsChildren() throws {
+        // Interactive zsh ignores SIGTERM; a hung rc child also keeps the output pipe open.
+        let shellPid = scratch.appendingPathComponent("shell.pid").path
+        let childPid = scratch.appendingPathComponent("child.pid").path
+        let shell = try makeShell("""
+        trap '' TERM
+        echo $$ > '\(shellPid)'
+        sleep 30 &
+        echo $! > '\(childPid)'
+        wait
+        """)
+        let start = Date()
+        XCTAssertNil(LaunchEnvironment.captureLoginShell(shell: shell, timeout: 0.5))
+        XCTAssertLessThan(Date().timeIntervalSince(start), 3)
+        let pids = try [shellPid, childPid].map { try XCTUnwrap(Int32(String(contentsOfFile: $0).trimmingCharacters(in: .whitespacesAndNewlines))) }
+        // kill(pid, 0) still succeeds on a zombie, so this also checks the shell was reaped.
+        XCTAssertTrue(kill(pids[0], 0) != 0, "the shell must be killed and reaped")
+        let deadline = Date().addingTimeInterval(2)   // the orphaned child is reaped by launchd
+        while kill(pids[1], 0) == 0 && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        XCTAssertTrue(kill(pids[1], 0) != 0, "the shell's children must be killed too")
+    }
+
     func testCaptureRealLoginShell() {
         let env = LaunchEnvironment.captureLoginShell(timeout: 10)
         XCTAssertNotNil(env?["PATH"], "the user's login shell (\(LaunchEnvironment.userShell)) should produce a PATH")

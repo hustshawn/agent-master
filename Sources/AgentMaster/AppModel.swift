@@ -37,8 +37,13 @@ final class AppModel {
         environmentTask = Task.detached {
             LaunchEnvironment.captureLoginShell() ?? ProcessInfo.processInfo.environment
         }
+        // Decide synchronously whether to restore so that any session started before the Task
+        // runs cannot race with restoreOpenSessions and wipe the journal with an empty list.
+        let pending = GeneralSettings.restoreSessionsOnLaunch(.standard) ? journal.load() : []
+        restoring = !pending.isEmpty
         do {
             try paths.prepare()
+            paths.removeAllSessionDirectories()
             let server = HookServer(socketPath: paths.socketPath) { message, reply in
                 // M3 replaces this with the native approval / question overlays.
                 if message.kind == .request { reply(nil) }
@@ -53,7 +58,7 @@ final class AppModel {
         }
         Task {
             _ = await environment()
-            await restoreOpenSessions()
+            await restoreOpenSessions(pending)
         }
     }
 
@@ -119,7 +124,8 @@ final class AppModel {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Close “\(session.row.title)”?"
-            alert.informativeText = "Claude is still working in \(session.projectName). The transcript is kept; continue it later with claude --resume."
+            let agentName = AgentRegistry.agent(id: session.agentId)?.displayName ?? "The agent"
+            alert.informativeText = "\(agentName) is still working in \(session.projectName). The transcript is kept, so the conversation can be resumed later."
             alert.addButton(withTitle: "Close")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -148,22 +154,33 @@ final class AppModel {
         }, agents: AgentRegistry.all))
     }
 
-    private func restoreOpenSessions() async {
-        guard GeneralSettings.restoreSessionsOnLaunch(.standard) else { return }
-        let plan = RestorePlan.make(records: journal.load(), agents: AgentRegistry.all) { path in
+    private func restoreOpenSessions(_ records: [OpenSessionRecord]) async {
+        let plan = RestorePlan.make(records: records, agents: AgentRegistry.all) { path in
             var isDirectory: ObjCBool = false
             return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
         }
-        guard !plan.isEmpty else { return }
-        restoring = true
-        var selected: String?
+        guard !plan.isEmpty else {
+            restoring = false
+            return
+        }
+        var restoredIds: Set<String> = []
+        var restoredSelected: String?
         for record in plan {
             guard let agent = AgentRegistry.agent(id: record.agentId),
                   let id = await startSession(in: record.projectPath, agent: agent, resumeId: record.resumeId)
             else { continue }
-            if record.selected { selected = id }
+            restoredIds.insert(id)
+            if record.selected { restoredSelected = id }
         }
-        if let selected { selectedId = selected }
+        // F6: if every startSession failed (e.g. claude not on PATH), leave the journal intact.
+        guard !restoredIds.isEmpty else {
+            restoring = false
+            return
+        }
+        // F1: only override the selection if the user has not picked a different session during restore.
+        if let restoredSelected, selectedId == nil || restoredIds.contains(selectedId ?? "") {
+            selectedId = restoredSelected
+        }
         restoring = false
         persistOpenSessions()
     }

@@ -30,7 +30,8 @@ public enum JSONValue: Equatable, Sendable {
         return nil
     }
 
-    public var intValue: Int? { doubleValue.map { Int($0) } }
+    /// Truncates toward zero; nil when the number is non-finite or outside Int's range (e.g. `1e20`).
+    public var intValue: Int? { doubleValue.flatMap { Int(exactly: $0.rounded(.towardZero)) } }
 
     public var boolValue: Bool? {
         if case .bool(let value) = self { return value }

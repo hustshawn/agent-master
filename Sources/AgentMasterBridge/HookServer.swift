@@ -63,6 +63,10 @@ public final class HookServer {
                 continue
             }
             guard let connection = accepted else { continue }
+            // Keep this read bound small. Reads are serial on this one thread (that is what keeps events
+            // in order), so a silent or stalled client delays every later event by up to this long, and
+            // 1 s is already above the 300 ms hook-latency target. The shim encodes before connecting,
+            // so a healthy client's line arrives immediately; do not raise this to accommodate slow ones.
             guard let line = try? connection.readLine(timeout: 1),
                   let message = try? WireCodec.decode(WireMessage.self, line: line) else {
                 connection.close()

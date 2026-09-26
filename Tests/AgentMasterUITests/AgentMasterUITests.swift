@@ -82,4 +82,17 @@ final class AgentMasterUITests: XCTestCase {
         XCTAssertFalse(state.changes.isEmpty)
         XCTAssertNotNil(state.usage)
     }
+
+    func testChoiceSelectionMapsStoredValuesToPickerTags() {
+        let choices = [AgentChoice(value: "opus"), AgentChoice(value: "sonnet")]
+        func tag(_ value: String?, custom: Bool = true, active: Bool = false) -> String {
+            AgentChoiceSelection.tag(for: value, choices: choices, allowsCustom: custom, customActive: active)
+        }
+        XCTAssertEqual(tag(nil), AgentChoiceSelection.followTag)
+        XCTAssertEqual(tag("opus"), "opus")
+        XCTAssertEqual(tag("us.anthropic.claude-opus-5-5[1m]"), AgentChoiceSelection.customTag, "unknown value shows as custom")
+        XCTAssertEqual(tag(nil, active: true), AgentChoiceSelection.customTag, "custom picked but nothing typed yet")
+        XCTAssertEqual(tag("yolo", custom: false), AgentChoiceSelection.followTag, "no custom row: unknown value follows")
+        XCTAssertNotEqual(AgentChoiceSelection.customTag, "custom", "cannot collide with a real value")
+    }
 }

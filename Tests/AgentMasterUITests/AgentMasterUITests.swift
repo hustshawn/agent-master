@@ -96,4 +96,47 @@ final class AgentMasterUITests: XCTestCase {
         XCTAssertEqual(tag("yolo", custom: false), AgentChoiceSelection.followTag, "no custom row: unknown value follows")
         XCTAssertNotEqual(AgentChoiceSelection.customTag, "custom", "cannot collide with a real value")
     }
+
+    func testSessionTitlePrefersCustomNameThenFirstPrompt() {
+        XCTAssertEqual(SessionTitle.text(customName: "Fix audio", firstPrompt: "say hi"), "Fix audio")
+        XCTAssertEqual(SessionTitle.text(customName: "   ", firstPrompt: "say hi"), "say hi")
+        XCTAssertEqual(SessionTitle.text(customName: nil, firstPrompt: nil), "New session")
+    }
+
+    func testPanelSummaryCountsAndEmptiness() {
+        var state = SessionState()
+        let empty = PanelSummary(state: state)
+        XCTAssertTrue(empty.todoEmpty && empty.agentsEmpty && empty.changesEmpty, "main alone is not content")
+
+        state.todos = [TodoItem(id: "1", subject: "a", status: .completed),
+                       TodoItem(id: "2", subject: "b", status: .inProgress),
+                       TodoItem(id: "3", subject: "c", status: .pending)]
+        state.subagents = [SubagentInfo(id: "s1", type: "t", startedAt: Date()),
+                           SubagentInfo(id: "s2", type: "t", startedAt: Date(), finishedAt: Date()),
+                           SubagentInfo(id: "s3", type: "t", startedAt: Date(), finishedAt: Date())]
+        state.changes = [FileChange(path: "a.swift", hunks: [])]
+        let summary = PanelSummary(state: state)
+        XCTAssertEqual(summary.openTodos, 2)
+        XCTAssertEqual(summary.runningAgents, 1)
+        XCTAssertEqual(summary.finishedAgents, 2)
+        XCTAssertEqual(summary.changedFiles, 1)
+        XCTAssertFalse(summary.todoEmpty || summary.agentsEmpty || summary.changesEmpty)
+    }
+
+    func testHeaderUsagePartsOmitMissingFieldsAndFlagHighContext() {
+        XCTAssertEqual(HeaderUsage.parts(usage: nil, mode: nil), [])
+        XCTAssertEqual(HeaderUsage.parts(usage: nil, mode: "bypassPermissions").map(\.text), ["bypass"])
+        XCTAssertEqual(HeaderUsage.parts(usage: nil, mode: "plan").map(\.text), ["plan"])
+
+        let usage = { (percent: Int?) in
+            Usage(modelName: "Opus 5.5", contextUsedPercent: percent, inputTokens: 45_800, outputTokens: 1_500, costUSD: 6.5)
+        }
+        XCTAssertEqual(HeaderUsage.parts(usage: usage(79), mode: "default").map(\.text),
+                       ["Opus 5.5", "default", "ctx 79%", "$6.50"])
+        XCTAssertEqual(HeaderUsage.parts(usage: usage(79), mode: nil).map(\.warning), [false, false, false])
+        XCTAssertEqual(HeaderUsage.parts(usage: usage(80), mode: nil)[1], HeaderUsage.Part(text: "ctx 80%", warning: true))
+        XCTAssertEqual(HeaderUsage.parts(usage: usage(nil), mode: nil).map(\.text), ["Opus 5.5", "$6.50"])
+        XCTAssertEqual(HeaderUsage.tokens(usage(1)), "↑45.8k ↓1.5k")
+        XCTAssertNil(HeaderUsage.tokens(nil))
+    }
 }

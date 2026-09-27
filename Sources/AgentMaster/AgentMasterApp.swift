@@ -1,4 +1,5 @@
 import SwiftUI
+import AgentMasterUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor lazy var model = AppModel()
@@ -21,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct AgentMasterApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @AppStorage(InspectorSettings.collapsedKey) private var inspectorCollapsed = InspectorSettings.collapsedByDefault
 
     var body: some Scene {
         // A single Window, not a WindowGroup: there is one terminal NSView per session, and a second
@@ -37,6 +39,10 @@ struct AgentMasterApp: App {
                     .keyboardShortcut("n")
                 Button("New Session in Folder…") { delegate.model.chooseProjectAndStart() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
+            }
+            CommandGroup(after: .sidebar) {
+                Button(inspectorCollapsed ? "Show Inspector" : "Hide Inspector") { inspectorCollapsed.toggle() }
+                    .keyboardShortcut("0", modifiers: [.command, .option])
             }
             CommandGroup(replacing: .saveItem) {
                 // In the main window ⌘W closes the selected session; elsewhere (Settings) it closes the window.

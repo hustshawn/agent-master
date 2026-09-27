@@ -29,8 +29,11 @@ public enum MuseFont {
     public static let body = Font.system(size: 13, design: .monospaced)
     public static let small = Font.system(size: 11, design: .monospaced)
     public static let heading = Font.system(size: 11, weight: .bold, design: .monospaced)
-    public static let rowTitle = Font.system(size: 14, design: .monospaced)
+    public static let rowTitle = Font.system(size: 15, design: .monospaced)
+    public static let rowSubtitle = Font.system(size: 12, design: .monospaced)
     public static let groupHeading = Font.system(size: 12, weight: .bold, design: .monospaced)
+    /// The one proportional face in the UI, so project names never read as session rows.
+    public static let groupTitle = Font.system(size: 15, weight: .bold)
 }
 
 public struct HairLine: View {

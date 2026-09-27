@@ -10,3 +10,5 @@
 | [0003](0003-closing-sessions.md) | 关闭会话的行为 | 已接受 |
 | [0004](0004-agent-abstraction.md) | 预留 Agent 抽象，设置按 agent 划分 | 已接受 |
 | [0005](0005-restore-sessions-on-launch.md) | 启动时恢复上次的会话 | 已接受 |
+| [0006](0006-sidebar-groups-and-session-titles.md) | 侧边栏项目分组与会话标题 | 提议中 |
+| [0007](0007-collapsible-inspector-and-header-usage.md) | 右侧面板按需展开、可收起，USAGE 移到页头 | 提议中 |

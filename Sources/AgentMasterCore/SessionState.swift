@@ -22,9 +22,20 @@ public struct SessionState: Equatable, Sendable {
     public var permissionMode: String?
     public var attentionMessage: String?
     public var lastMessage: String?
+    /// The first real prompt of this conversation (slash commands skipped); names the session by default.
+    public var firstPrompt: String?
     public var endReason: String?
 
     public init() {}
+
+    /// The first non-blank line of a prompt, or nil for blank prompts and slash commands.
+    static func titleLine(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("/") else { return nil }
+        return trimmed.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty }
+    }
 
     public mutating func apply(_ event: SessionEvent, at now: Date = Date()) {
         switch event {
@@ -37,6 +48,7 @@ public struct SessionState: Equatable, Sendable {
                 runningTools = []
                 lastTool = nil
                 lastMessage = nil
+                firstPrompt = nil
             }
             self.claudeSessionId = claudeSessionId
             self.cwd = cwd
@@ -45,7 +57,8 @@ public struct SessionState: Equatable, Sendable {
             attentionMessage = nil
             endReason = nil
 
-        case .promptSubmitted:
+        case .promptSubmitted(let text):
+            if firstPrompt == nil, let line = Self.titleLine(text) { firstPrompt = line }
             setStatus(.running)
             attentionMessage = nil
 

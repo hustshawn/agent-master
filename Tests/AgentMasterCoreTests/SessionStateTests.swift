@@ -121,4 +121,25 @@ final class SessionStateTests: XCTestCase {
         XCTAssertFalse(SessionStatus.idle.needsCloseConfirmation)
         XCTAssertFalse(SessionStatus.ended.needsCloseConfirmation)
     }
+
+    func testFirstPromptSkipsBlankAndSlashCommandsAndKeepsTheFirst() {
+        var state = SessionState()
+        state.apply(.promptSubmitted(text: "   "))
+        state.apply(.promptSubmitted(text: "/model"))
+        XCTAssertNil(state.firstPrompt)
+        state.apply(.promptSubmitted(text: "\n  fix the bug\nin add()"))
+        XCTAssertEqual(state.firstPrompt, "fix the bug")
+        state.apply(.promptSubmitted(text: "second prompt"))
+        XCTAssertEqual(state.firstPrompt, "fix the bug")
+    }
+
+    func testFirstPromptResetsOnANewConversationOnly() {
+        var state = SessionState()
+        state.apply(.sessionStarted(claudeSessionId: "a", cwd: "/p", transcriptPath: nil))
+        state.apply(.promptSubmitted(text: "hello"))
+        state.apply(.sessionStarted(claudeSessionId: "a", cwd: "/p", transcriptPath: nil))
+        XCTAssertEqual(state.firstPrompt, "hello")
+        state.apply(.sessionStarted(claudeSessionId: "b", cwd: "/p", transcriptPath: nil))
+        XCTAssertNil(state.firstPrompt)
+    }
 }

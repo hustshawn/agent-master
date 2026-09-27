@@ -12,3 +12,4 @@
 | [0005](0005-restore-sessions-on-launch.md) | 启动时恢复上次的会话 | 已接受 |
 | [0006](0006-sidebar-groups-and-session-titles.md) | 侧边栏项目分组与会话标题 | 已接受 |
 | [0007](0007-collapsible-inspector-and-header-usage.md) | 右侧面板按需展开、可收起，USAGE 移到页头 | 已接受 |
+| [0008](0008-app-icon.md) | App 图标：A 与 M 交织的几何字母组合 | 已接受 |

@@ -1,7 +1,7 @@
 # 侧边栏分组 + 右侧面板收纳 设计文档
 
 - 日期：2026-09-27
-- 状态：待审阅
+- 状态：已批准（2026-09-27）
 - 决策记录：`docs/adr/0006-sidebar-groups-and-session-titles.md`、`docs/adr/0007-collapsible-inspector-and-header-usage.md`
 - 前置：主 spec `2026-09-26-agent-master-design.md` §4.5；`2026-09-26-agent-abstraction-design.md` §8（会话恢复）
 - 路线图：这是面板和侧边栏改造的第 1 步。后面依次是基于 git 的 CHANGES 与 diff 审查、子 agent 结论、待处理收件箱（M3）。2026-09-27 看过示例后，调整为这个顺序

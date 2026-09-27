@@ -1,7 +1,7 @@
 # 0006 侧边栏项目分组与会话标题
 
 - 日期：2026-09-27
-- 状态：提议中。详细设计见 `docs/superpowers/specs/2026-09-27-sidebar-and-panel-design.md` §2
+- 状态：已接受（2026-09-27）。详细设计见 `docs/superpowers/specs/2026-09-27-sidebar-and-panel-design.md` §2
 
 ## 背景
 

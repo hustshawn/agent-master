@@ -9,9 +9,10 @@ BIN="$(swift build -c release --show-bin-path)"
 
 APP="build/AgentMaster.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources"
 cp "$BIN/AgentMaster" "$APP/Contents/MacOS/AgentMaster"
 cp "$BIN/agentmaster-hook" "$APP/Contents/Helpers/agentmaster-hook"
+cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"   # regenerate with scripts/make-icon.swift
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -21,6 +22,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key><string>com.agentmaster.app</string>
     <key>CFBundleName</key><string>AgentMaster</string>
     <key>CFBundleExecutable</key><string>AgentMaster</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>

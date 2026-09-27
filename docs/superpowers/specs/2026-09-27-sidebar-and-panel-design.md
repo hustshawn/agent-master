@@ -4,7 +4,7 @@
 - 状态：待审阅
 - 决策记录：`docs/adr/0006-sidebar-groups-and-session-titles.md`、`docs/adr/0007-collapsible-inspector-and-header-usage.md`
 - 前置：主 spec `2026-09-26-agent-master-design.md` §4.5；`2026-09-26-agent-abstraction-design.md` §8（会话恢复）
-- 路线图：这是面板和侧边栏改造的第 1 步，后面依次是子 agent 详情、基于 git 的 CHANGES、待处理收件箱（M3）
+- 路线图：这是面板和侧边栏改造的第 1 步。后面依次是基于 git 的 CHANGES 与 diff 审查、子 agent 结论、待处理收件箱（M3）。2026-09-27 看过示例后，调整为这个顺序
 
 ## 1. 背景与目标
 
@@ -28,7 +28,8 @@
 不做：
 - 面板根据内容自动收起。用户选了手动切换，因为自动收起会让终端宽度跳动。
 - 拖动改变面板宽度（现在已经支持）。
-- 子 agent 详情、基于 git 的 CHANGES、收件箱。这些属于路线图的后续步骤。
+- 基于 git 的 CHANGES、子 agent 结论、收件箱。这些属于路线图的后续步骤。
+- 为新模型打开 Claude 的任务工具（`CLAUDE_CODE_ENABLE_TASKS`），见 §3.0。
 - 分组折叠状态跨重启保留。
 
 ### 1.2 成功标准
@@ -54,7 +55,8 @@
 
 - **标题行**：
   - `▾`/`▸`，然后是 SF Symbol `folder`，然后是项目名。
-  - 项目名用新增的字体 token `MuseFont.groupTitle`（13pt、semibold、等宽），颜色是 `Palette.text`。
+  - 项目名用新增的字体 token `MuseFont.groupTitle`，颜色是 `Palette.text`。这个 token 是 15pt、bold、**非等宽**的 SF Pro，也是整个界面里唯一的非等宽字体，用来让项目名在字形上和会话行区分开。这一版是看过示例后定下的；第一版用的是 13pt 等宽，区分度不够。
+  - 会话行也跟着调大：标题 `MuseFont.rowTitle` 从 14pt 改为 15pt，副标题改用新增的 `MuseFont.rowSubtitle`（12pt 等宽）。
   - 右侧依次是会话数（`MuseFont.small`、`Palette.muted`）和 `＋`。
   - 鼠标悬停显示完整路径（`.help`）。
 - **折叠**：点击标题行（`＋` 除外）切换折叠，折叠后隐藏这个分组的会话行。
@@ -91,6 +93,12 @@
 
 ## 3. 右侧面板（ADR 0007）
 
+### 3.0 定位
+
+面板定位为**按需打开的审查面板**，默认收起成徽标细栏。它回答三个问题：这个会话改了什么（路线图第 2 步：git diff 审查）、子 agent 得出了什么结论（第 3 步）、有什么需要我处理（第 4 步：M3）。本期只搭好收纳和徽标框架，内容还是现有的三个区块。
+
+TODO 在新模型（例如 Opus 5.5）下大多是空的：这一版 Claude Code 只给老模型默认提供 TaskCreate/TodoWrite。2026-09-27 实测，把模型换成 haiku 后 TODO 能正常显示。按用户的决定，AgentMaster 不注入 `CLAUDE_CODE_ENABLE_TASKS`，跟随 Claude 的默认。
+
 ### 3.1 空区块折成一行
 
 - `PanelSection` 新增参数 `isEmpty: Bool`。
@@ -104,7 +112,7 @@
 
 ### 3.2 收起成细栏
 
-- 收起状态存在 UserDefaults 的 `panelCollapsed` 键里（Bool，默认 false），App 层用 `@AppStorage` 读写。
+- 收起状态存在 UserDefaults 的 `panelCollapsed` 键里（Bool，**默认 true**，也就是默认收起），App 层用 `@AppStorage` 读写。
 - 切换有两个入口：
   - 菜单 View ▸ `Toggle Inspector`，快捷键 ⌘⌥0。
   - 页头最右侧的按钮，SF Symbol `sidebar.right`。
@@ -139,7 +147,7 @@ AgentMaster ▸ am-demo ▸ say hi              Opus 5.5 · bypass · ctx 5% · 
 | `AgentMasterCore/SessionState.swift` | `firstPrompt` 字段及其规则 |
 | `AgentMasterCore/OpenSessionRecord.swift` | 增加 `title: String?` |
 | `AgentMasterBridge/SessionRestore.swift` | `OpenSessionSnapshot.title`；`records` 把它带上 |
-| `AgentMasterUI/Style.swift` | 增加 `MuseFont.groupTitle` |
+| `AgentMasterUI/Style.swift` | 增加 `MuseFont.groupTitle`（15pt bold 非等宽）和 `rowSubtitle`（12pt）；`rowTitle` 改为 15pt |
 | `AgentMasterUI/SessionSidebar.swift` | 分组标题、分隔线、折叠、缩进、改名、`SessionTitle`；`SessionRowModel` 的 title 改由调用方传入 `SessionTitle` 的结果 |
 | `AgentMasterUI/PanelSection.swift` | `isEmpty` 参数 |
 | `AgentMasterUI/SidePanel.swift` | 三个区块；增加 `PanelSummary` |

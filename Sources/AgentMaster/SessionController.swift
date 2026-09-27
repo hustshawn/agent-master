@@ -17,7 +17,8 @@ final class SessionController: Identifiable {
     @ObservationIgnored var onStateChange: (() -> Void)?
     let createdAt = Date()
     private(set) var state = SessionState()
-    private(set) var title: String?
+    /// Set by the user (Rename…) or carried over from the journal when restored.
+    var customName: String?
     @ObservationIgnored let terminal: TerminalSession
     @ObservationIgnored private var translator = HookTranslator()
 
@@ -30,9 +31,6 @@ final class SessionController: Identifiable {
         terminal.onExit = { [weak self] _ in
             guard let self, self.state.status != .ended else { return }
             self.apply([.sessionEnded(reason: "process_exit")])
-        }
-        terminal.onTitle = { [weak self] title in
-            self?.title = title.isEmpty ? nil : title
         }
     }
 
@@ -50,12 +48,16 @@ final class SessionController: Identifiable {
         if !events.isEmpty { onStateChange?() }
     }
 
+    var displayTitle: String {
+        SessionTitle.text(customName: customName, firstPrompt: state.firstPrompt)
+    }
+
     var projectName: String {
         (projectPath as NSString).lastPathComponent
     }
 
     var row: SessionRowModel {
-        SessionRowModel(id: id, projectPath: projectPath, title: title ?? "Session \(id.prefix(4))",
+        SessionRowModel(id: id, projectPath: projectPath, title: displayTitle,
                         subtitle: SessionSubtitle.text(for: state), status: state.status, createdAt: createdAt)
     }
 }

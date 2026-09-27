@@ -4,6 +4,7 @@ import TerminalKit
 
 struct MainWindow: View {
     @Bindable var model: AppModel
+    @AppStorage(InspectorSettings.collapsedKey) private var inspectorCollapsed = InspectorSettings.collapsedByDefault
 
     var body: some View {
         HSplitView {
@@ -11,21 +12,29 @@ struct MainWindow: View {
                            recentProjects: model.recentProjects,
                            onNewIn: { model.start(in: $0) },
                            onChooseFolder: { model.chooseProjectAndStart() },
-                           onClose: { model.close($0) })
+                           onClose: { model.close($0) },
+                           onRename: { model.rename($0, to: $1) })
             .frame(minWidth: 180, idealWidth: 240, maxWidth: 360)
 
             if let session = model.selected {
                 VStack(spacing: 0) {
-                    SessionHeader(project: session.projectName, model: session.state.usage?.modelName,
-                                  mode: session.state.permissionMode,
-                                  needsAttention: session.state.status == .needsAttention)
+                    SessionHeader(project: session.projectName, session: session.displayTitle,
+                                  usage: session.state.usage, mode: session.state.permissionMode,
+                                  needsAttention: session.state.status == .needsAttention,
+                                  inspectorCollapsed: inspectorCollapsed,
+                                  onToggleInspector: { inspectorCollapsed.toggle() })
                     TerminalHost(session: session.terminal)
                         .id(session.id)
                 }
                 .frame(minWidth: 520)
 
-                SidePanel(state: session.state)
-                    .frame(minWidth: 240, idealWidth: 320, maxWidth: 480)
+                if inspectorCollapsed {
+                    InspectorRail(summary: PanelSummary(state: session.state)) { inspectorCollapsed = false }
+                        .frame(width: 28)
+                } else {
+                    SidePanel(state: session.state)
+                        .frame(minWidth: 240, idealWidth: 320, maxWidth: 480)
+                }
             } else {
                 VStack(spacing: 12) {
                     EmptyHint("No session")

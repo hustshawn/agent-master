@@ -38,6 +38,15 @@ public enum SessionSubtitle {
     }
 }
 
+/// The row title: the user's name for the session, else its first prompt, else a placeholder.
+public enum SessionTitle {
+    public static func text(customName: String?, firstPrompt: String?) -> String {
+        if let name = customName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty { return name }
+        if let prompt = firstPrompt, !prompt.isEmpty { return prompt }
+        return "New session"
+    }
+}
+
 public struct SessionGroup: Identifiable, Equatable {
     public let id: String
     public let name: String
@@ -74,42 +83,37 @@ public struct SessionSidebar: View {
     let onNewIn: (String) -> Void
     let onChooseFolder: () -> Void
     let onClose: (String) -> Void
+    let onRename: (String, String) -> Void
+    /// Project paths whose rows are hidden; kept for this run only.
+    @State private var collapsed: Set<String> = []
+    @State private var editingId: String?
+    @State private var draft = ""
 
     public init(rows: [SessionRowModel], selection: Binding<String?>, recentProjects: [String],
                 onNewIn: @escaping (String) -> Void, onChooseFolder: @escaping () -> Void,
-                onClose: @escaping (String) -> Void) {
+                onClose: @escaping (String) -> Void, onRename: @escaping (String, String) -> Void) {
         self.rows = rows
         self._selection = selection
         self.recentProjects = recentProjects
         self.onNewIn = onNewIn
         self.onChooseFolder = onChooseFolder
         self.onClose = onClose
+        self.onRename = onRename
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(SessionGrouping.group(rows)) { group in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack {
-                                Text("▾ " + group.name).font(MuseFont.groupHeading).foregroundStyle(Palette.muted)
-                                    .help(group.id)
-                                Spacer(minLength: 0)
-                                Button { onNewIn(group.id) } label: {
-                                    Text("＋").font(MuseFont.groupHeading).foregroundStyle(Palette.muted)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .help("New session in \(group.name)")
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(SessionGrouping.group(rows).enumerated()), id: \.element.id) { index, group in
+                        if index > 0 { HairLine().padding(.vertical, 8) }
+                        groupHeader(group)
+                        if !collapsed.contains(group.id) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(group.rows) { row in sessionRow(row) }
                             }
-                            ForEach(group.rows) { row in
-                                SessionRow(row: row, selected: row.id == selection) { onClose(row.id) }
-                                    .onTapGesture { selection = row.id }
-                                    .contextMenu {
-                                        Button("Close Session") { onClose(row.id) }
-                                    }
-                            }
+                            .padding(.leading, 18)
+                            .padding(.top, 4)
                         }
                     }
                 }
@@ -135,21 +139,89 @@ public struct SessionSidebar: View {
         }
         .background(Palette.bg)
     }
+
+    private func groupHeader(_ group: SessionGroup) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                if collapsed.contains(group.id) { collapsed.remove(group.id) } else { collapsed.insert(group.id) }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(collapsed.contains(group.id) ? "▸" : "▾").font(MuseFont.small).foregroundStyle(Palette.faint)
+                        .frame(width: 10)
+                    Image(systemName: "folder").font(.system(size: 14)).foregroundStyle(Palette.muted)
+                    Text(group.name).font(MuseFont.groupTitle).foregroundStyle(Palette.text).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text("\(group.rows.count)").font(MuseFont.small).foregroundStyle(Palette.muted)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(group.id)
+            Button { onNewIn(group.id) } label: {
+                Text("＋").font(MuseFont.groupHeading).foregroundStyle(Palette.muted)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("New session in \(group.name)")
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+    }
+
+    private func sessionRow(_ row: SessionRowModel) -> some View {
+        SessionRow(row: row, selected: row.id == selection, editing: editingId == row.id, draft: $draft,
+                   onClose: { onClose(row.id) },
+                   onCommit: { commitRename(row.id) },
+                   onCancel: { editingId = nil })
+            .onTapGesture { selection = row.id }
+            .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(row) })
+            .contextMenu {
+                Button("Rename…") { beginRename(row) }
+                Button("Close Session") { onClose(row.id) }
+            }
+    }
+
+    private func beginRename(_ row: SessionRowModel) {
+        draft = row.title
+        editingId = row.id
+    }
+
+    private func commitRename(_ id: String) {
+        guard editingId == id else { return }
+        editingId = nil
+        onRename(id, draft)
+    }
 }
 
 struct SessionRow: View {
     let row: SessionRowModel
     let selected: Bool
+    let editing: Bool
+    @Binding var draft: String
     let onClose: () -> Void
+    let onCommit: () -> Void
+    let onCancel: () -> Void
     @State private var hovering = false
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(StatusGlyph.symbol(for: row.status)).foregroundStyle(Color(hex: StatusGlyph.colorHex(for: row.status)))
             VStack(alignment: .leading, spacing: 2) {
-                Text(row.title).foregroundStyle(selected ? Palette.text : Palette.muted).lineLimit(1)
+                if editing {
+                    TextField("", text: $draft)
+                        .textFieldStyle(.plain)
+                        .foregroundStyle(Palette.text)
+                        .focused($fieldFocused)
+                        .onSubmit(onCommit)
+                        .onExitCommand(perform: onCancel)
+                        .onAppear { fieldFocused = true }
+                        .onChange(of: fieldFocused) { _, focused in if !focused { onCommit() } }
+                } else {
+                    Text(row.title).foregroundStyle(selected ? Palette.text : Palette.muted).lineLimit(1)
+                }
                 if !row.subtitle.isEmpty {
-                    Text(row.subtitle).font(MuseFont.small).foregroundStyle(Palette.faint).lineLimit(1)
+                    Text(row.subtitle).font(MuseFont.rowSubtitle).foregroundStyle(Palette.faint).lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
@@ -158,7 +230,7 @@ struct SessionRow: View {
             }
             .buttonStyle(.plain)
             .help("Close session")
-            .opacity(hovering ? 1 : 0)
+            .opacity(hovering && !editing ? 1 : 0)
         }
         .onHover { hovering = $0 }
         .font(MuseFont.rowTitle)

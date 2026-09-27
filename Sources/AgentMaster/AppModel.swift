@@ -88,7 +88,7 @@ final class AppModel {
 
     @discardableResult
     func startSession(in projectPath: String, agent: any AgentKind = AgentRegistry.defaultAgent,
-                      resumeId: String? = nil) async -> String? {
+                      resumeId: String? = nil, title: String? = nil) async -> String? {
         do {
             let base = await environment()
             let id = UUID().uuidString
@@ -99,6 +99,7 @@ final class AppModel {
                 id: id, agentId: agent.id, projectPath: projectPath, resumeHint: resumeId,
                 launch: TerminalLaunch(executable: launch.executable, args: launch.args,
                                        environment: launch.environment, currentDirectory: projectPath))
+            session.customName = title
             session.onStateChange = { [weak self] in self?.persistOpenSessions() }
             sessions.append(session)
             selectedId = id
@@ -109,6 +110,14 @@ final class AppModel {
             errorMessage = error.localizedDescription
             return nil
         }
+    }
+
+    /// A blank name clears the custom title, so the row falls back to the first prompt.
+    func rename(_ id: String, to name: String) {
+        guard let session = sessions.first(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        session.customName = trimmed.isEmpty ? nil : trimmed
+        persistOpenSessions()
     }
 
     /// ⌘W. Returns false when there is no session, so the window closes as usual.
@@ -150,7 +159,8 @@ final class AppModel {
         guard !restoring else { return }
         journal.save(RestorePlan.records(from: sessions.map {
             OpenSessionSnapshot(agentId: $0.agentId, projectPath: $0.projectPath, createdAt: $0.createdAt,
-                                state: $0.state, selected: $0.id == selectedId, fallbackResumeId: $0.resumeHint)
+                                state: $0.state, selected: $0.id == selectedId, fallbackResumeId: $0.resumeHint,
+                                title: $0.customName ?? $0.state.firstPrompt)
         }, agents: AgentRegistry.all))
     }
 
@@ -167,7 +177,8 @@ final class AppModel {
         var restoredSelected: String?
         for record in plan {
             guard let agent = AgentRegistry.agent(id: record.agentId),
-                  let id = await startSession(in: record.projectPath, agent: agent, resumeId: record.resumeId)
+                  let id = await startSession(in: record.projectPath, agent: agent, resumeId: record.resumeId,
+                                              title: record.title)
             else { continue }
             restoredIds.insert(id)
             if record.selected { restoredSelected = id }

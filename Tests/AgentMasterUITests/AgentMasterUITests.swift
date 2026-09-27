@@ -139,4 +139,38 @@ final class AgentMasterUITests: XCTestCase {
         XCTAssertEqual(HeaderUsage.tokens(usage(1)), "↑45.8k ↓1.5k")
         XCTAssertNil(HeaderUsage.tokens(nil))
     }
+
+    func testUnchangedRenameCommitsNothing() {
+        var rename = RenameState()
+        rename.begin("r1", title: "New session")
+        XCTAssertNil(rename.commit("r1"), "a stray double-click must not freeze the placeholder as a name")
+        XCTAssertNil(rename.editingId)
+
+        rename.begin("r1", title: "say hi")
+        rename.draft = "  say hi "
+        XCTAssertNil(rename.commit("r1"), "whitespace-only differences are not a rename")
+    }
+
+    func testChangedOrClearedRenameCommitsTheDraft() {
+        var rename = RenameState()
+        rename.begin("r1", title: "say hi")
+        rename.draft = "Fix audio"
+        XCTAssertEqual(rename.commit("r1"), "Fix audio")
+
+        rename.begin("r1", title: "Fix audio")
+        rename.draft = ""
+        XCTAssertEqual(rename.commit("r1"), "", "clearing asks AppModel to drop the custom name")
+        XCTAssertNil(rename.commit("r1"), "a second commit (Enter, then focus loss) does nothing")
+    }
+
+    func testBeginningAgainOnTheEditedRowKeepsTheDraft() {
+        var rename = RenameState()
+        rename.begin("r1", title: "say hi")
+        rename.draft = "Fix au"
+        rename.begin("r1", title: "say hi")   // a double-click inside the field
+        XCTAssertEqual(rename.draft, "Fix au")
+        rename.cancel()
+        XCTAssertNil(rename.editingId)
+        XCTAssertNil(rename.commit("r1"))
+    }
 }

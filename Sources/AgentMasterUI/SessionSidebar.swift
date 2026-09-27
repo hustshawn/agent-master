@@ -47,6 +47,36 @@ public enum SessionTitle {
     }
 }
 
+/// In-place rename of one sidebar row. Only a real change is committed, so a stray double-click
+/// never freezes the placeholder or the first prompt as a custom name.
+public struct RenameState: Equatable {
+    public private(set) var editingId: String?
+    public var draft = ""
+    private var original = ""
+
+    public init() {}
+
+    /// A second begin on the row being edited (a double-click inside the field) keeps what was typed.
+    public mutating func begin(_ id: String, title: String) {
+        guard editingId != id else { return }
+        editingId = id
+        draft = title
+        original = title
+    }
+
+    /// Ends editing. Returns the name to apply ("" clears it), or nil when nothing changed.
+    public mutating func commit(_ id: String) -> String? {
+        guard editingId == id else { return nil }
+        editingId = nil
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed == original.trimmingCharacters(in: .whitespacesAndNewlines) ? nil : draft
+    }
+
+    public mutating func cancel() {
+        editingId = nil
+    }
+}
+
 public struct SessionGroup: Identifiable, Equatable {
     public let id: String
     public let name: String
@@ -86,8 +116,7 @@ public struct SessionSidebar: View {
     let onRename: (String, String) -> Void
     /// Project paths whose rows are hidden; kept for this run only.
     @State private var collapsed: Set<String> = []
-    @State private var editingId: String?
-    @State private var draft = ""
+    @State private var rename = RenameState()
 
     public init(rows: [SessionRowModel], selection: Binding<String?>, recentProjects: [String],
                 onNewIn: @escaping (String) -> Void, onChooseFolder: @escaping () -> Void,
@@ -169,12 +198,14 @@ public struct SessionSidebar: View {
     }
 
     private func sessionRow(_ row: SessionRowModel) -> some View {
-        SessionRow(row: row, selected: row.id == selection, editing: editingId == row.id, draft: $draft,
-                   onClose: { onClose(row.id) },
-                   onCommit: { commitRename(row.id) },
-                   onCancel: { editingId = nil })
-            .onTapGesture { selection = row.id }
-            .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(row) })
+        let editing = rename.editingId == row.id
+        // While a row is a text field its own clicks belong to the field, not to select or rename.
+        return SessionRow(row: row, selected: row.id == selection, editing: editing, draft: $rename.draft,
+                          onClose: { onClose(row.id) },
+                          onCommit: { commitRename(row.id) },
+                          onCancel: { rename.cancel() })
+            .gesture(TapGesture().onEnded { selection = row.id }, including: editing ? .subviews : .all)
+            .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(row) }, including: editing ? .subviews : .all)
             .contextMenu {
                 Button("Rename…") { beginRename(row) }
                 Button("Close Session") { onClose(row.id) }
@@ -182,14 +213,11 @@ public struct SessionSidebar: View {
     }
 
     private func beginRename(_ row: SessionRowModel) {
-        draft = row.title
-        editingId = row.id
+        rename.begin(row.id, title: row.title)
     }
 
     private func commitRename(_ id: String) {
-        guard editingId == id else { return }
-        editingId = nil
-        onRename(id, draft)
+        if let name = rename.commit(id) { onRename(id, name) }
     }
 }
 

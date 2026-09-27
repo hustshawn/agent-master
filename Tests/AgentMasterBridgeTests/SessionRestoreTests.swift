@@ -126,4 +126,30 @@ final class SessionRestoreTests: XCTestCase {
         defaults.set(false, forKey: GeneralSettings.restoreSessionsOnLaunchKey)
         XCTAssertFalse(GeneralSettings.restoreSessionsOnLaunch(defaults))
     }
+
+    // MARK: titles
+
+    func testRecordsCarryTheTitle() {
+        let snapshot = OpenSessionSnapshot(agentId: "claude", projectPath: "/p", createdAt: Date(timeIntervalSince1970: 0),
+                                           state: state(.idle, claudeId: "a"), selected: false,
+                                           fallbackResumeId: nil, title: "fix the bug")
+        XCTAssertEqual(RestorePlan.records(from: [snapshot], agents: agents).map(\.title), ["fix the bug"])
+    }
+
+    func testTitleRoundTripsThroughTheJournal() {
+        let journal = OpenSessionJournal(fileURL: journalURL)
+        let titled = OpenSessionRecord(agentId: "claude", projectPath: "/p", createdAt: Date(timeIntervalSince1970: 60),
+                                       resumeId: "a", selected: true, title: "fix the bug")
+        journal.save([titled, record(resumeId: "b")])
+        XCTAssertEqual(OpenSessionJournal(fileURL: journalURL).load().map(\.title), ["fix the bug", nil])
+    }
+
+    func testLegacyRecordWithoutTitleDecodes() throws {
+        try FileManager.default.createDirectory(at: journalURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let legacy = #"[{"agentId":"claude","projectPath":"/p","createdAt":0,"resumeId":"a","selected":false}]"#
+        try Data(legacy.utf8).write(to: journalURL)
+        let records = OpenSessionJournal(fileURL: journalURL).load()
+        XCTAssertEqual(records.map(\.resumeId), ["a"])
+        XCTAssertNil(records[0].title)
+    }
 }

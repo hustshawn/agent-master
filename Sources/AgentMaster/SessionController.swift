@@ -57,7 +57,12 @@ final class SessionController: Identifiable {
     }
 
     var row: SessionRowModel {
-        SessionRowModel(id: id, projectPath: projectPath, title: displayTitle,
-                        subtitle: SessionSubtitle.text(for: state), status: state.status, createdAt: createdAt)
+        // Claude sessions keep the plain subtitle; others say which agent they run.
+        var subtitle = SessionSubtitle.text(for: state)
+        if agentId != AgentRegistry.defaultAgent.id, let name = AgentRegistry.agent(id: agentId)?.displayName {
+            subtitle = "\(name) · \(subtitle)"
+        }
+        return SessionRowModel(id: id, projectPath: projectPath, title: displayTitle,
+                               subtitle: subtitle, status: state.status, createdAt: createdAt)
     }
 }

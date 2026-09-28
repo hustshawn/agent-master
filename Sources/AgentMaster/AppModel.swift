@@ -67,23 +67,23 @@ final class AppModel {
     }
 
     /// ⌘N: another session next to the selected one; the folder picker only when nothing is open.
-    func newSessionInCurrentProject() {
-        guard let project = selected?.projectPath else { return chooseProjectAndStart() }
-        start(in: project)
+    func newSessionInCurrentProject(agent: any AgentKind = AgentRegistry.defaultAgent) {
+        guard let project = selected?.projectPath else { return chooseProjectAndStart(agent: agent) }
+        start(in: project, agent: agent)
     }
 
-    func start(in projectPath: String) {
-        Task { await startSession(in: projectPath) }
+    func start(in projectPath: String, agent: any AgentKind = AgentRegistry.defaultAgent) {
+        Task { await startSession(in: projectPath, agent: agent) }
     }
 
-    func chooseProjectAndStart() {
+    func chooseProjectAndStart(agent: any AgentKind = AgentRegistry.defaultAgent) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Start Session"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        start(in: url.path)
+        start(in: url.path, agent: agent)
     }
 
     @discardableResult

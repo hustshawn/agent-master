@@ -106,11 +106,24 @@ public enum SessionGrouping {
     }
 }
 
+/// An agent the sidebar can start a session with. The first one is the default.
+public struct NewSessionAgent: Identifiable, Equatable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
 public struct SessionSidebar: View {
     let rows: [SessionRowModel]
     @Binding var selection: String?
     let recentProjects: [String]
-    let onNewIn: (String) -> Void
+    let agents: [NewSessionAgent]
+    /// (project path, agent id)
+    let onNewIn: (String, String) -> Void
     let onChooseFolder: () -> Void
     let onClose: (String) -> Void
     let onRename: (String, String) -> Void
@@ -119,11 +132,12 @@ public struct SessionSidebar: View {
     @State private var rename = RenameState()
 
     public init(rows: [SessionRowModel], selection: Binding<String?>, recentProjects: [String],
-                onNewIn: @escaping (String) -> Void, onChooseFolder: @escaping () -> Void,
+                agents: [NewSessionAgent], onNewIn: @escaping (String, String) -> Void, onChooseFolder: @escaping () -> Void,
                 onClose: @escaping (String) -> Void, onRename: @escaping (String, String) -> Void) {
         self.rows = rows
         self._selection = selection
         self.recentProjects = recentProjects
+        self.agents = agents
         self.onNewIn = onNewIn
         self.onChooseFolder = onChooseFolder
         self.onClose = onClose
@@ -152,7 +166,7 @@ public struct SessionSidebar: View {
             HairLine()
             Menu {
                 ForEach(recentProjects, id: \.self) { path in
-                    Button((path as NSString).lastPathComponent) { onNewIn(path) }
+                    Button((path as NSString).lastPathComponent) { onNewIn(path, defaultAgentId) }
                         .help(path)
                 }
                 if !recentProjects.isEmpty { Divider() }
@@ -186,15 +200,27 @@ public struct SessionSidebar: View {
             }
             .buttonStyle(.plain)
             .help(group.id)
-            Button { onNewIn(group.id) } label: {
+            // Clicking ＋ starts the default agent; its menu picks another one.
+            Menu {
+                ForEach(agents) { agent in
+                    Button(agent.name) { onNewIn(group.id, agent.id) }
+                }
+            } label: {
                 Text("＋").font(MuseFont.groupHeading).foregroundStyle(Palette.muted)
                     .contentShape(Rectangle())
+            } primaryAction: {
+                onNewIn(group.id, defaultAgentId)
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
             .help("New session in \(group.name)")
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 6)
+    }
+
+    private var defaultAgentId: String {
+        agents.first?.id ?? ""
     }
 
     private func sessionRow(_ row: SessionRowModel) -> some View {

@@ -1,8 +1,8 @@
 import Foundation
 import AgentMasterCore
 
-/// A coding agent AgentMaster can run in a terminal. Claude Code is the only one today; the protocol holds
-/// just what Claude already needs, so it is not shaped around guesses about other agents.
+/// A coding agent AgentMaster can run in a terminal: Claude Code or Codex. The protocol holds just what
+/// these need, so it is not shaped around guesses about other agents.
 public protocol AgentKind: Sendable {
     /// Part of the stored preference keys: never change it once shipped.
     var id: String { get }
@@ -54,12 +54,15 @@ public struct AgentLaunch: Equatable {
 
 public enum AgentLaunchError: LocalizedError, Equatable {
     case claudeNotFound
+    case codexNotFound
     case hookHelperMissing
 
     public var errorDescription: String? {
         switch self {
         case .claudeNotFound:
             return "Claude Code not found. Install it (~/.local/bin/claude) or set AGENTMASTER_CLAUDE_PATH."
+        case .codexNotFound:
+            return "Codex CLI not found. Install it (~/.local/bin/codex) or set AGENTMASTER_CODEX_PATH."
         case .hookHelperMissing:
             return "agentmaster-hook is missing. Build with scripts/bundle.sh, or `swift build` so it sits next to the app binary."
         }

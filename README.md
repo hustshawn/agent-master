@@ -4,6 +4,13 @@
 
 # AgentMaster
 
+[![Release](https://github.com/hustshawn/agent-master/actions/workflows/release.yml/badge.svg)](https://github.com/hustshawn/agent-master/actions/workflows/release.yml)
+[![Download](https://img.shields.io/badge/download-latest-blue)](https://github.com/hustshawn/agent-master/releases/latest)
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
+![Swift 5.10+](https://img.shields.io/badge/Swift-5.10%2B-F05138?logo=swift&logoColor=white)
+![Apple silicon](https://img.shields.io/badge/arch-Apple%20silicon-555)
+![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex-D97757)
+
 One native macOS app for all your coding-agent CLIs.
 
 AgentMaster runs each agent's real TUI in an embedded terminal and manages them from one window. You get a session sidebar across projects and agents, live panels for the current session, and per-agent defaults. It does not reimplement any agent. Every CLI keeps its own harness and works exactly as it does in your terminal, with its own config, instructions, skills, MCP servers, hooks and plugins. AgentMaster only adds a thin, per-session layer on top.
@@ -40,7 +47,7 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
 
 ## Download
 
-Each tagged version is published on the [Releases](https://github.com/hustshawn/agent-master/releases) page as `AgentMaster-<tag>.zip`, built for Apple silicon. The app is ad-hoc signed and not notarized, so after moving it to Applications run `xattr -dr com.apple.quarantine /Applications/AgentMaster.app` before the first launch.
+Each tagged version is published on the [Releases](https://github.com/hustshawn/agent-master/releases) page as `AgentMaster-<tag>.dmg`, built for Apple silicon. Open the disk image and drag AgentMaster to Applications. The app is ad-hoc signed and not notarized, so run `xattr -dr com.apple.quarantine /Applications/AgentMaster.app` before the first launch.
 
 ## Build and run
 
@@ -51,7 +58,7 @@ open build/AgentMaster.app
 
 ### Releasing
 
-Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests, bundles with the tag as the version, and creates the GitHub release with the zip attached:
+Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests, bundles with the tag as the version, packs the app into a disk image with `scripts/make-dmg.sh`, and creates the GitHub release with the image attached:
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0

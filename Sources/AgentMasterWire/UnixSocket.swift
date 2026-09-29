@@ -1,4 +1,25 @@
 import Foundation
+// The same calls on both platforms; on macOS these are exactly the Darwin functions used before.
+#if canImport(Glibc)
+import Glibc
+private let posixConnect = Glibc.connect
+private let posixAccept = Glibc.accept
+private let posixRead = Glibc.read
+private let posixClose = Glibc.close
+/// Linux has no SO_NOSIGPIPE, so each write asks for EPIPE instead of a process-killing SIGPIPE.
+private func posixWrite(_ fd: Int32, _ buffer: UnsafeRawPointer, _ count: Int) -> Int {
+    send(fd, buffer, count, Int32(MSG_NOSIGNAL))
+}
+private let streamSocket = Int32(SOCK_STREAM.rawValue)
+#else
+import Darwin
+private let posixConnect = Darwin.connect
+private let posixAccept = Darwin.accept
+private let posixRead = Darwin.read
+private let posixWrite = Darwin.write
+private let posixClose = Darwin.close
+private let streamSocket = SOCK_STREAM
+#endif
 
 public enum UnixSocketError: Error, Equatable {
     case pathTooLong
@@ -32,12 +53,12 @@ public enum UnixSocket {
 
     public static func connect(path: String) throws -> UnixSocketConnection {
         let address = try makeSocketAddress(path)
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = socket(AF_UNIX, streamSocket, 0)
         guard fd >= 0 else { throw UnixSocketError.system("socket", errno) }
-        let result = withSockaddr(address) { Darwin.connect(fd, $0, $1) }
+        let result = withSockaddr(address) { posixConnect(fd, $0, $1) }
         guard result == 0 else {
             let code = errno
-            Darwin.close(fd)
+            posixClose(fd)
             throw UnixSocketError.system("connect", code)
         }
         return UnixSocketConnection(fd: fd)
@@ -55,8 +76,10 @@ public final class UnixSocketConnection {
 
     init(fd: Int32) {
         self.fd = fd
+        #if canImport(Darwin)
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        #endif
         var timeout = timeval(tv_sec: Int(UnixSocket.sendTimeout), tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     }
@@ -82,7 +105,7 @@ public final class UnixSocketConnection {
             var offset = 0
             while offset < raw.count {
                 if offset > 0 && Date() >= deadline { throw UnixSocketError.timeout }
-                let written = Darwin.write(fd, base + offset, raw.count - offset)
+                let written = posixWrite(fd, base + offset, raw.count - offset)
                 if written < 0 {
                     if errno == EINTR { continue }
                     if errno == EAGAIN || errno == EWOULDBLOCK { throw UnixSocketError.timeout }   // SO_SNDTIMEO
@@ -109,7 +132,7 @@ public final class UnixSocketConnection {
                 }
             }
             var chunk = [UInt8](repeating: 0, count: 4096)
-            let count = Darwin.read(fd, &chunk, chunk.count)
+            let count = posixRead(fd, &chunk, chunk.count)
             if count < 0 {
                 if errno == EINTR { continue }
                 throw UnixSocketError.system("read", errno)
@@ -125,10 +148,10 @@ public final class UnixSocketConnection {
         isClosed = true
         // Wakes a write blocked in the kernel, so the writeLock below is released promptly.
         // The fd is still open here: only this call, which won the isClosed flip, ever closes it.
-        shutdown(fd, SHUT_RDWR)
+        shutdown(fd, Int32(SHUT_RDWR))
         lock.unlock()
         writeLock.lock()
-        Darwin.close(fd)
+        posixClose(fd)
         writeLock.unlock()
     }
 }
@@ -147,22 +170,22 @@ public final class UnixSocketListener {
             throw UnixSocketError.addressInUse
         }
         unlink(path)   // a crashed previous run may have left the file behind
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = socket(AF_UNIX, streamSocket, 0)
         guard fd >= 0 else { throw UnixSocketError.system("socket", errno) }
         guard withSockaddr(address, { bind(fd, $0, $1) }) == 0 else {
             let code = errno
-            Darwin.close(fd)
+            posixClose(fd)
             throw UnixSocketError.system("bind", code)
         }
         guard chmod(path, 0o600) == 0 else {
             let code = errno
-            Darwin.close(fd)
+            posixClose(fd)
             unlink(path)
             throw UnixSocketError.system("chmod", code)
         }
         guard listen(fd, 64) == 0 else {
             let code = errno
-            Darwin.close(fd)
+            posixClose(fd)
             unlink(path)
             throw UnixSocketError.system("listen", code)
         }
@@ -183,7 +206,7 @@ public final class UnixSocketListener {
             if errno == EINTR { return nil }
             throw UnixSocketError.system("poll", errno)
         }
-        let client = Darwin.accept(fd, nil, nil)
+        let client = posixAccept(fd, nil, nil)
         if client < 0 {
             if errno == EINTR || errno == ECONNABORTED || errno == EAGAIN { return nil }
             throw UnixSocketError.system("accept", errno)
@@ -196,7 +219,7 @@ public final class UnixSocketListener {
         defer { lock.unlock() }
         guard !isClosed else { return }
         isClosed = true
-        Darwin.close(fd)
+        posixClose(fd)
         unlink(path)
     }
 }

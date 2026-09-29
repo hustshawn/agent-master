@@ -63,6 +63,8 @@ final class AppPathsTests: XCTestCase {
 
     func testStandardSocketPathFitsInSunPath() {
         XCTAssertLessThan(AppPaths.standard.socketPath.utf8.count, 104)
+        #if os(macOS)   // the Mac app's location; the Linux server always passes its own data directory
         XCTAssertTrue(AppPaths.standard.socketPath.hasSuffix("Application Support/AgentMaster/agentmaster.sock"))
+        #endif
     }
 }

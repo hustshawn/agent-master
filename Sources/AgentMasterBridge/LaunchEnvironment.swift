@@ -69,6 +69,33 @@ public enum LaunchEnvironment {
     /// everything it started. A new session, not just a new group: an interactive zsh left in the caller's
     /// session opens the controlling tty from a background group and is stopped by SIGTTOU/SIGTTIN.
     private static func spawnInOwnProcessGroup(_ path: String, arguments: [String], stdout: Int32) -> pid_t? {
+        #if os(Linux)
+        // glibc: the spawn types are structs, and there is no POSIX_SPAWN_CLOEXEC_DEFAULT (the server captures
+        // this before it opens any socket, so nothing is inherited that matters).
+        var actions = posix_spawn_file_actions_t()
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        posix_spawn_file_actions_adddup2(&actions, stdout, 1)
+        posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
+
+        var attributes = posix_spawnattr_t()
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        let setsid: Int32 = 0x80   // POSIX_SPAWN_SETSID (glibc 2.26+), not exported to Swift without _GNU_SOURCE
+        posix_spawnattr_setflags(&attributes, Int16(setsid | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
+        var signals = sigset_t()
+        sigfillset(&signals)
+        posix_spawnattr_setsigdefault(&attributes, &signals)
+        sigemptyset(&signals)
+        posix_spawnattr_setsigmask(&attributes, &signals)
+
+        let argv = arguments.map { strdup($0) } + [nil]
+        defer { argv.forEach { free($0) } }
+        var pid: pid_t = 0
+        guard posix_spawn(&pid, path, &actions, &attributes, argv, environ) == 0 else { return nil }
+        return pid
+        #else
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
         defer { posix_spawn_file_actions_destroy(&actions) }
@@ -92,6 +119,7 @@ public enum LaunchEnvironment {
         var pid: pid_t = 0
         guard posix_spawn(&pid, path, &actions, &attributes, argv, environ) == 0 else { return nil }
         return pid
+        #endif
     }
 
     private static func reap(_ pid: pid_t) {

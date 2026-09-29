@@ -42,12 +42,18 @@ final class UnixSocketTests: XCTestCase {
     func testStaleSocketFromACrashedRunIsReplaced() throws {
         // Bound and then closed without unlink: nobody is listening behind the file any more.
         var address = try makeSocketAddress(path)
+        #if canImport(Glibc)
+        let stale = socket(AF_UNIX, Int32(SOCK_STREAM.rawValue), 0)
+        let posixBind = Glibc.bind, posixClose = Glibc.close
+        #else
         let stale = socket(AF_UNIX, SOCK_STREAM, 0)
+        let posixBind = Darwin.bind, posixClose = Darwin.close
+        #endif
         let bound = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(stale, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { posixBind(stale, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         XCTAssertEqual(bound, 0)
-        Darwin.close(stale)
+        _ = posixClose(stale)
         let listener = try UnixSocketListener(path: path)
         defer { listener.close() }
         XCTAssertNoThrow(try UnixSocket.connect(path: path))

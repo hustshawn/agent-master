@@ -15,6 +15,7 @@ AgentMaster runs the real Claude Code TUI in an embedded terminal and wraps it i
 - **Review inspector.** A collapsible side panel (⌥⌘0) shows todos, subagents and file changes for the selected session.
 - **Header status.** The model, permission mode, context usage and cost are always visible.
 - **Per-agent settings (⌘,).** Set the default model, permission mode and whether bypass is allowed for new sessions.
+- **Codex CLI too.** Every ＋ opens a panel where you pick Claude Code or [OpenAI Codex](https://github.com/openai/codex) and, optionally, a model other than the agent's default; ⌥⌘N starts Codex directly. Its panels and restore work through Codex hooks, which AgentMaster runs with `--dangerously-bypass-hook-trust`; turn that off in Settings to run Codex without hooks.
 - **Non-invasive integration.** Hooks are injected per session through `--settings`. Your global Claude Code configuration is never modified. If AgentMaster isn't running, Claude Code falls back to its normal behaviour.
 
 ## Requirements
@@ -22,6 +23,7 @@ AgentMaster runs the real Claude Code TUI in an embedded terminal and wraps it i
 - macOS 14 or later
 - Xcode 15.4 (Swift 5.10) or later
 - Claude Code installed at `~/.local/bin/claude`, or anywhere on your login shell's `PATH`. To point at a different binary, set `AGENTMASTER_CLAUDE_PATH`.
+- Optional: Codex CLI 0.154 or later, found the same way (`~/.local/bin/codex`, `PATH`, or `AGENTMASTER_CODEX_PATH`).
 
 ## Build and run
 

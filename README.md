@@ -60,11 +60,15 @@ open build/AgentMaster.app
 
 ### Releasing
 
-Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests, bundles with the tag as the version, packs the app into a disk image with `scripts/make-dmg.sh`, and creates the GitHub release with the image attached:
+Pull requests and `main` run `.github/workflows/ci.yml`. It only runs the tests, and only for the side a change can affect. The Mac app is tested on macOS, the server on Linux x86_64, and shared code on both. Docs-only changes run nothing. Builds are cached.
+
+Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests and builds everything with the tag as the version: the Mac app's disk image and static server packages for Linux x86_64 and arm64. Then it creates the GitHub release with those files and `install-server.sh` attached:
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
 ```
+
+To try the full release build before tagging, run it by hand (Actions → Release → Run workflow). It builds and packages everything and publishes nothing.
 
 ## Web edition
 

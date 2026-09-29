@@ -2,13 +2,14 @@
 #   AgentMaster-v0.2.0.dmg                                 the Mac app
 #   agentmaster-server-v0.2.0-linux-{x86_64,aarch64}.tar.gz  the web edition's server, Swift runtime linked in
 #   install-server.sh                                      installs or upgrades the server on a Linux machine
-# Pull requests run the same builds and tests; only a tag publishes.
+# Pull requests only run the tests (ci.yml). To try the full release build before tagging, run this workflow
+# by hand (Actions → Release → Run workflow): it builds and packages everything and publishes nothing.
 name: Release
 
 on:
   push:
     tags: ["v*"]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write

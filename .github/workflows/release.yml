@@ -1,4 +1,4 @@
-# Pushing a tag like v0.2.0 tests, bundles and publishes AgentMaster-v0.2.0.zip as a GitHub release.
+# Pushing a tag like v0.2.0 tests, bundles and publishes AgentMaster-v0.2.0.dmg as a GitHub release.
 name: Release
 
 on:
@@ -27,19 +27,18 @@ jobs:
       - name: Bundle
         run: VERSION="${GITHUB_REF_NAME#v}" BUILD_NUMBER="$GITHUB_RUN_NUMBER" ./scripts/bundle.sh
 
-      - name: Zip
-        # ditto keeps the bundle's signature and extended attributes intact.
-        run: ditto -c -k --keepParent build/AgentMaster.app "AgentMaster-$GITHUB_REF_NAME.zip"
+      - name: Disk image
+        run: ./scripts/make-dmg.sh "AgentMaster-$GITHUB_REF_NAME.dmg"
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "AgentMaster-$GITHUB_REF_NAME.zip" \
+          gh release create "$GITHUB_REF_NAME" "AgentMaster-$GITHUB_REF_NAME.dmg" \
             --title "AgentMaster $GITHUB_REF_NAME" --generate-notes --notes "$(cat <<'EOF'
-          Apple silicon, macOS 14 or later.
+          Apple silicon, macOS 14 or later. Open the disk image and drag AgentMaster to Applications.
 
-          The app is ad-hoc signed, not notarized, so macOS blocks it on first open. After unzipping and moving it to Applications, run:
+          The app is ad-hoc signed, not notarized, so macOS blocks it on first open. After copying it to Applications, run:
 
           ```
           xattr -dr com.apple.quarantine /Applications/AgentMaster.app

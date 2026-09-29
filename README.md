@@ -47,7 +47,7 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
 
 ## Download
 
-Each tagged version is published on the [Releases](https://github.com/hustshawn/agent-master/releases) page as `AgentMaster-<tag>.zip`, built for Apple silicon. The app is ad-hoc signed and not notarized, so after moving it to Applications run `xattr -dr com.apple.quarantine /Applications/AgentMaster.app` before the first launch.
+Each tagged version is published on the [Releases](https://github.com/hustshawn/agent-master/releases) page as `AgentMaster-<tag>.dmg`, built for Apple silicon. Open the disk image and drag AgentMaster to Applications. The app is ad-hoc signed and not notarized, so run `xattr -dr com.apple.quarantine /Applications/AgentMaster.app` before the first launch.
 
 ## Build and run
 
@@ -58,7 +58,7 @@ open build/AgentMaster.app
 
 ### Releasing
 
-Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests, bundles with the tag as the version, and creates the GitHub release with the zip attached:
+Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests, bundles with the tag as the version, packs the app into a disk image with `scripts/make-dmg.sh`, and creates the GitHub release with the image attached:
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0

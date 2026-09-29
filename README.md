@@ -114,7 +114,7 @@ build/agentmaster-server-linux-x86_64/agentmaster-server
 | `--data-dir` | `~/.agentmaster-server` | Sessions, `settings.json` and the token. Separate from the Mac app's data, so both can run on one machine |
 | `--token` | `AGENTMASTER_SERVER_TOKEN`, else `<data-dir>/token` | The access token. A random one is created on first start |
 
-`agentmaster-hook` must stay next to `agentmaster-server`, and the server must run as a user whose login shell finds the agents. In the browser, Alt+N starts another session with the selected session's agent, and Alt+0 toggles the inspector. The design is in [ADR 0011](docs/adr/0011-web-edition.md).
+`agentmaster-hook` must stay next to `agentmaster-server`, and the server must run as a user whose login shell finds the agents. In the browser, Alt+N starts another session with the selected session's agent, and Alt+0 toggles the inspector. Images pasted (⌘V) or dropped into the terminal are uploaded to the session's folder in the data directory, and their path goes to the agent, which attaches them. They are deleted with the session. The design is in [ADR 0011](docs/adr/0011-web-edition.md).
 
 ## Development
 

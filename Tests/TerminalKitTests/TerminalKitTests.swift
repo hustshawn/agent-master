@@ -41,4 +41,23 @@ final class TerminalKitTests: XCTestCase {
         })
         XCTAssertEqual(try String(contentsOf: out, encoding: .utf8), "hello|\(real)")
     }
+
+    func testPastingAnImageOnlyClipboardSendsCtrlV() throws {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("am-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let png = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1, bitsPerSample: 8,
+                                                 samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                                 colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)?
+            .representation(using: .png, properties: [:]))
+        pasteboard.clearContents()
+        pasteboard.setData(png, forType: .png)
+        XCTAssertEqual(AgentTerminalView.pasteInput(pasteboard: pasteboard, kittyKeyboard: false), "\u{16}")
+        XCTAssertEqual(AgentTerminalView.pasteInput(pasteboard: pasteboard, kittyKeyboard: true), "\u{1b}[118;5u")
+
+        pasteboard.setString("hello", forType: .string)
+        XCTAssertNil(AgentTerminalView.pasteInput(pasteboard: pasteboard, kittyKeyboard: true))
+        pasteboard.clearContents()
+        pasteboard.setString("hello", forType: .string)
+        XCTAssertNil(AgentTerminalView.pasteInput(pasteboard: pasteboard, kittyKeyboard: true))
+    }
 }

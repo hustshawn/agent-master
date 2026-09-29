@@ -283,6 +283,24 @@ function showTerminal(session) {
     state.terminals.set(session.id, entry);
     term.onData((data) => send(entry, { type: "input", data }));
     term.onResize(({ cols, rows }) => send(entry, { type: "resize", columns: cols, rows }));
+    // The agent runs on the server and cannot see this machine's clipboard: pasted or dropped images are
+    // uploaded, and their server path is pasted instead, which the agent attaches like a clipboard image.
+    node.addEventListener("paste", (event) => {
+      const data = event.clipboardData;
+      if (!data || data.getData("text/plain")) return;
+      const images = [...data.files].filter((file) => file.type.startsWith("image/"));
+      if (!images.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pasteImages(entry, images);
+    }, true);
+    node.addEventListener("dragover", (event) => event.preventDefault());
+    node.addEventListener("drop", (event) => {
+      const images = [...(event.dataTransfer?.files ?? [])].filter((file) => file.type.startsWith("image/"));
+      if (!images.length) return;
+      event.preventDefault();
+      pasteImages(entry, images);
+    });
     new ResizeObserver(() => { if (!node.hidden) fitTerminal(entry); }).observe(node);
     connectTerminal(entry);
   }
@@ -290,6 +308,22 @@ function showTerminal(session) {
   fitTerminal(entry);
   // Leave focus alone while a dialog or a rename field has it.
   if (!document.querySelector("dialog[open]") && !state.renaming) entry.term.focus();
+}
+
+async function pasteImages(entry, files) {
+  for (const file of files) {
+    try {
+      const response = await fetch(`/api/sessions/${entry.id}/images`, {
+        method: "POST", headers: { Authorization: "Bearer " + state.token, "Content-Type": file.type }, body: file,
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error?.message ?? response.statusText);
+      entry.term.paste(body.path);
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+  entry.term.focus();
 }
 
 function fitTerminal(entry) {

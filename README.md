@@ -12,6 +12,7 @@
 ![Swift 5.10+](https://img.shields.io/badge/Swift-5.10%2B-F05138?logo=swift&logoColor=white)
 ![Apple silicon](https://img.shields.io/badge/arch-Apple%20silicon-555)
 ![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex-D97757)
+[![License: proprietary](https://img.shields.io/badge/license-proprietary-lightgrey)](LICENSE)
 
 One native macOS app for all your coding-agent CLIs.
 
@@ -165,3 +166,7 @@ This is an early internal tool and is still under active development. The roadma
 1. A git-based review of changes
 2. Subagent results in the inspector
 3. Native approval and question prompts
+
+## License
+
+Copyright (c) 2026 Shawn Zhang. All rights reserved. The code is proprietary: using, copying or distributing it needs the copyright holder's written permission. Third-party components keep their own licenses. See [LICENSE](LICENSE).

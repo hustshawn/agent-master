@@ -15,6 +15,7 @@ import AgentMasterBridge
 ///     POST   /api/sessions                             {"projectPath", "agentId"?, "model"?, "columns"?, "rows"?}
 ///     PATCH  /api/sessions/{id}                        {"name": "..."}
 ///     DELETE /api/sessions/{id}
+///     POST   /api/sessions/{id}/images                 an image as the body (Content-Type image/*): {"path"}
 ///     GET    /api/recents                              recent project folders
 ///     GET    /api/folders?path=                        subfolders of a server folder, for the folder picker
 ///     WS     /api/events                               ServerEvent JSON: a snapshot, then every change
@@ -68,6 +69,19 @@ public enum WebServer {
             try mapErrors { try manager.rename(id: context.parameters.require("id"), to: body.name) }
             return .noContent
         }
+        api.post("sessions/:id/images") { request, context -> ImageResponse in
+            let body: ByteBuffer
+            do {
+                body = try await request.body.collect(upTo: maxImageBytes)
+            } catch is NIOTooManyBytesError {
+                throw HTTPError(.contentTooLarge, message: "Images can be at most \(maxImageBytes / 1024 / 1024) MB.")
+            }
+            let contentType = request.headers[.contentType]?.split(separator: ";").first.map(String.init) ?? ""
+            return try mapErrors {
+                ImageResponse(path: try manager.saveImage(sessionId: context.parameters.require("id"),
+                                                          data: Data(body.readableBytesView), contentType: contentType))
+            }
+        }
         api.delete("sessions/:id") { _, context -> HTTPResponse.Status in
             try mapErrors { try manager.close(id: context.parameters.require("id")) }
             return .noContent
@@ -108,6 +122,8 @@ public enum WebServer {
             try await TerminalBridge.run(session: session, inbound: inbound, outbound: outbound)
         }
     }
+
+    static let maxImageBytes = 20 * 1024 * 1024
 
     static func json<T: Encodable>(_ value: T) throws -> String {
         String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
@@ -209,6 +225,10 @@ struct AgentsResponse: ResponseEncodable {
 
 struct SessionsResponse: ResponseEncodable {
     let sessions: [SessionJSON]
+}
+
+struct ImageResponse: ResponseEncodable {
+    let path: String
 }
 
 struct RecentsResponse: ResponseEncodable {

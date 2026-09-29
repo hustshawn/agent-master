@@ -100,8 +100,10 @@ final class LaunchEnvironmentTests: XCTestCase {
         wait
         """)
         let start = Date()
-        XCTAssertNil(LaunchEnvironment.captureLoginShell(shell: shell, timeout: 0.5))
-        XCTAssertLessThan(Date().timeIntervalSince(start), 3)
+        // The shell must write its pids before the timeout. A freshly written script can take ~0.45 s to start
+        // on its first run (macOS checks new executables), so 0.5 s was too tight.
+        XCTAssertNil(LaunchEnvironment.captureLoginShell(shell: shell, timeout: 2))
+        XCTAssertLessThan(Date().timeIntervalSince(start), 4)
         let pids = try [shellPid, childPid].map { try XCTUnwrap(Int32(String(contentsOfFile: $0).trimmingCharacters(in: .whitespacesAndNewlines))) }
         // kill(pid, 0) still succeeds on a zombie, so this also checks the shell was reaped.
         XCTAssertTrue(kill(pids[0], 0) != 0, "the shell must be killed and reaped")

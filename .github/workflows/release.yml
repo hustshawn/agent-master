@@ -1,0 +1,48 @@
+# Pushing a tag like v0.2.0 tests, bundles and publishes AgentMaster-v0.2.0.zip as a GitHub release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          # Xcode 26 and later ship the Metal toolchain separately; SwiftTerm compiles a Metal shader.
+          xcodebuild -downloadComponent MetalToolchain
+
+      - name: Test
+        run: swift test
+
+      - name: Bundle
+        run: VERSION="${GITHUB_REF_NAME#v}" BUILD_NUMBER="$GITHUB_RUN_NUMBER" ./scripts/bundle.sh
+
+      - name: Zip
+        # ditto keeps the bundle's signature and extended attributes intact.
+        run: ditto -c -k --keepParent build/AgentMaster.app "AgentMaster-$GITHUB_REF_NAME.zip"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "AgentMaster-$GITHUB_REF_NAME.zip" \
+            --title "AgentMaster $GITHUB_REF_NAME" --generate-notes --notes "$(cat <<'EOF'
+          Apple silicon, macOS 14 or later.
+
+          The app is ad-hoc signed, not notarized, so macOS blocks it on first open. After unzipping and moving it to Applications, run:
+
+          ```
+          xattr -dr com.apple.quarantine /Applications/AgentMaster.app
+          ```
+          EOF
+          )"

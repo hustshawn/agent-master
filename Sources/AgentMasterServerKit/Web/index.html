@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentMaster</title>
+  <link rel="icon" href="icon.png" type="image/png">
+  <link rel="stylesheet" href="vendor/xterm.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <img src="icon.png" width="56" height="56" alt="">
+      <h1>AgentMaster</h1>
+      <p>Paste the access token the server printed at startup, or open the link it printed.</p>
+      <input id="login-token" type="password" placeholder="Access token" autocomplete="current-password" autofocus>
+      <p id="login-error" class="error" hidden></p>
+      <button type="submit" class="primary">Connect</button>
+    </form>
+  </div>
+
+  <div id="app" class="app" hidden>
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <span class="brand">AgentMaster</span>
+        <button id="open-settings" class="icon-button" title="Settings">⚙︎</button>
+      </div>
+      <div id="groups" class="groups"></div>
+      <div id="connection" class="connection" hidden>Reconnecting…</div>
+      <button id="new-session" class="new-session">＋ New session</button>
+    </aside>
+
+    <main class="main">
+      <header id="header" class="header">
+        <div class="crumbs"><span class="dim">AgentMaster</span><span id="crumb-project"></span><span id="crumb-session"></span></div>
+        <div class="header-right">
+          <span id="usage" class="usage"></span>
+          <button id="toggle-inspector" class="icon-button" title="Toggle inspector (Alt+0)">▤</button>
+        </div>
+      </header>
+      <div id="attention" class="attention" hidden></div>
+      <div id="terminals" class="terminals">
+        <div id="empty" class="empty">
+          <p class="dim">No session</p>
+          <button id="empty-new" class="link">New Session…</button>
+        </div>
+      </div>
+    </main>
+
+    <aside id="inspector" class="inspector">
+      <section class="panel" data-panel="todos"><h2>TODO <span class="count"></span></h2><div class="panel-body"></div></section>
+      <section class="panel" data-panel="agents"><h2>AGENTS <span class="count"></span></h2><div class="panel-body"></div></section>
+      <section class="panel" data-panel="changes"><h2>CHANGES <span class="count"></span></h2><div class="panel-body"></div></section>
+    </aside>
+  </div>
+
+  <dialog id="new-dialog" class="dialog">
+    <form method="dialog" id="new-form" class="new-form">
+      <h1>New Session</h1>
+      <div class="field">
+        <label>AGENT</label>
+        <div id="new-agents" class="agent-cards"></div>
+      </div>
+      <div class="field">
+        <label for="new-model">MODEL</label>
+        <select id="new-model"></select>
+        <input id="new-model-custom" type="text" placeholder="Model id" hidden>
+      </div>
+      <div class="field">
+        <label for="new-project">PROJECT</label>
+        <div class="row">
+          <input id="new-project" type="text" list="new-recents" placeholder="/path/on/the/server" spellcheck="false">
+          <datalist id="new-recents"></datalist>
+          <button type="button" id="new-browse">Browse…</button>
+        </div>
+      </div>
+      <p id="new-error" class="error" hidden></p>
+      <div class="actions">
+        <button type="button" id="new-cancel">Cancel</button>
+        <button type="submit" id="new-start" class="primary">Start</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="folder-dialog" class="dialog">
+    <div class="folder">
+      <h1>Choose a folder</h1>
+      <p id="folder-path" class="path"></p>
+      <ul id="folder-list" class="folder-list"></ul>
+      <div class="actions">
+        <button type="button" id="folder-cancel">Cancel</button>
+        <button type="button" id="folder-choose" class="primary">Choose This Folder</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="settings-dialog" class="dialog settings-dialog">
+    <div class="settings">
+      <nav id="settings-nav" class="settings-nav"></nav>
+      <div id="settings-page" class="settings-page"></div>
+      <button id="settings-close" class="icon-button settings-close" title="Close">✕</button>
+    </div>
+  </dialog>
+
+  <script src="vendor/xterm.js"></script>
+  <script src="vendor/addon-fit.js"></script>
+  <script src="vendor/addon-web-links.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

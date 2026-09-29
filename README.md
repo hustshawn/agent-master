@@ -2,6 +2,8 @@
   <img src="Assets/AppIcon-1024.png" width="128" alt="AgentMaster icon">
 </p>
 
+> **AI agent asked to install AgentMaster on a (Linux) server?** Follow [docs/INSTALL-AGENT.md](docs/INSTALL-AGENT.md) and ignore the macOS app parts of this README.
+
 # AgentMaster
 
 [![Release](https://github.com/hustshawn/agent-master/actions/workflows/release.yml/badge.svg)](https://github.com/hustshawn/agent-master/actions/workflows/release.yml)
@@ -47,7 +49,7 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
 
 ## Download
 
-Each tagged version is published on the [Releases](https://github.com/hustshawn/agent-master/releases) page as `AgentMaster-<tag>.dmg`, built for Apple silicon. Open the disk image and drag AgentMaster to Applications. The app is ad-hoc signed and not notarized, so run `xattr -dr com.apple.quarantine /Applications/AgentMaster.app` before the first launch.
+Each tagged version is published on the [Releases](https://github.com/hustshawn/agent-master/releases) page as `AgentMaster-<tag>.dmg`, built for Apple silicon. Open the disk image and drag AgentMaster to Applications. The app is ad-hoc signed and not notarized, so run `xattr -dr com.apple.quarantine /Applications/AgentMaster.app` before the first launch. The same release also carries the [web edition](#web-edition) server for Linux x86_64 and aarch64, plus `install-server.sh`.
 
 ## Build and run
 
@@ -58,11 +60,60 @@ open build/AgentMaster.app
 
 ### Releasing
 
-Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests, bundles with the tag as the version, packs the app into a disk image with `scripts/make-dmg.sh`, and creates the GitHub release with the image attached:
+Pull requests and `main` run `.github/workflows/ci.yml`. It only runs the tests, and only for the side a change can affect. The Mac app is tested on macOS, the server on Linux x86_64, and shared code on both. Docs-only changes run nothing. Builds are cached.
+
+Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests and builds everything with the tag as the version: the Mac app's disk image and static server packages for Linux x86_64 and arm64. Then it creates the GitHub release with those files and `install-server.sh` attached:
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
 ```
+
+To try the full release build before tagging, run it by hand (Actions → Release → Run workflow). It builds and packages everything and publishes nothing.
+
+## Web edition
+
+`agentmaster-server` runs the same agents on a remote machine (Linux or macOS) and serves the AgentMaster UI to a browser. It has the sidebar, the real agent TUI in the page (xterm.js), the inspector, the new-session panel and Settings. Sessions live on the server, so closing the browser does not stop an agent. Reconnecting shows the terminal again.
+
+### Install on a Linux server
+
+On the server (x86_64 or aarch64), log in as the user who runs `claude` or `codex` and run:
+
+```bash
+gh release download -R hustshawn/agent-master -p install-server.sh -O - | bash
+```
+
+This downloads the latest release's server package for the machine's architecture. The Swift runtime is linked in, so the server needs no Swift. It installs to `~/.local/share/agentmaster-server` and runs as a systemd user service with lingering on, so it keeps running after you log out and restarts if it crashes. Then it prints the link with the token. No root is needed.
+
+- Run the same command again to upgrade. Sessions, settings and the token in `~/.agentmaster-server` are kept.
+- Pass options after `bash -s --`, for example `… | bash -s -- --port 9000`:
+  - `--host`, `--port`: where the server listens
+  - `--version v0.3.0`: install a specific release
+  - `--from FILE`: install from a package you already downloaded
+  - `--uninstall`: remove it
+- Without `gh`, set `GITHUB_TOKEN` to a token that can read the repo. Fetch the script with `curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github.raw" https://api.github.com/repos/hustshawn/agent-master/contents/scripts/install-server.sh | bash`.
+- Manage it with `systemctl --user status|restart|stop agentmaster-server`, and read the logs with `journalctl --user -u agentmaster-server -f`. Where there is no systemd user session, such as a container, it falls back to `nohup`.
+
+It listens on `127.0.0.1` by default. From your machine, `ssh -L 8765:127.0.0.1:8765 you@server` and open the printed link. For access over a network, put it behind your own TLS-terminating proxy or load balancer, and pass `--host 0.0.0.0` if the proxy is on another machine. Anyone with the token can run commands as the server's user.
+
+### Run it yourself
+
+To build from source (Swift 6, on the machine it will run on), or on macOS:
+
+```bash
+scripts/package-server.sh                          # → build/agentmaster-server-<os>-<arch>/ and a .tar.gz
+build/agentmaster-server-linux-x86_64/agentmaster-server
+# AgentMaster server on http://127.0.0.1:8765
+# Open: http://127.0.0.1:8765/#token=…
+```
+
+| Option | Default | |
+|---|---|---|
+| `--host` | `127.0.0.1` | Address to listen on |
+| `--port` | `8765` | |
+| `--data-dir` | `~/.agentmaster-server` | Sessions, `settings.json` and the token. Separate from the Mac app's data, so both can run on one machine |
+| `--token` | `AGENTMASTER_SERVER_TOKEN`, else `<data-dir>/token` | The access token. A random one is created on first start |
+
+`agentmaster-hook` must stay next to `agentmaster-server`, and the server must run as a user whose login shell finds the agents. In the browser, Alt+N starts another session with the selected session's agent, and Alt+0 toggles the inspector. The design is in [ADR 0011](docs/adr/0011-web-edition.md).
 
 ## Development
 
@@ -70,6 +121,8 @@ git tag v0.2.0 && git push origin v0.2.0
 swift build
 swift test                   # unit and integration tests
 python3 scripts/smoke.py     # end-to-end check against the real claude (uses a few cents of Haiku tokens)
+uv run --with websockets scripts/web-smoke.py --agent claude   # the same through agentmaster-server's API (or --agent codex, --restart)
+uv run --with playwright scripts/web-ui-check.py               # the web UI in headless Chromium against the real claude
 swift scripts/make-icon.swift  # regenerate Assets/AppIcon.icns
 ```
 
@@ -84,6 +137,9 @@ The code is a single SwiftPM package with these targets:
 | `TerminalKit` | SwiftTerm wrapper |
 | `AgentMasterUI` | Sidebar, inspector, header, new-session panel and settings views |
 | `AgentMaster` | The app |
+| `CPTY` | Starts an agent in a pseudo-terminal (web edition) |
+| `AgentMasterServerKit` | Sessions, HTTP/WebSocket API and the browser UI (web edition) |
+| `agentmaster-server` | The web edition's server |
 
 ### Adding an agent
 

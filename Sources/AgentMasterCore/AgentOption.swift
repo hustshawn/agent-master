@@ -14,11 +14,14 @@ public struct AgentOption: Equatable, Sendable {
     public let id: String
     public let title: String
     public let kind: Kind
+    /// A secondary line under the title, e.g. what turning a toggle on costs.
+    public let note: String?
 
-    public init(id: String, title: String, kind: Kind) {
+    public init(id: String, title: String, kind: Kind, note: String? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
+        self.note = note
     }
 }
 

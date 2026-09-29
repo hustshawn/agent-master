@@ -3,7 +3,7 @@ import AgentMasterCore
 import AgentMasterBridge
 import AgentMasterUI
 
-/// Defaults for new sessions, one section per agent. Values live in UserDefaults via AgentPreferenceStore.
+/// Defaults for new sessions, one page per agent. Values live in UserDefaults via AgentPreferenceStore.
 struct SettingsView: View {
     let model: AppModel
     @State private var preferences: [String: AgentPreferences] = [:]
@@ -11,30 +11,38 @@ struct SettingsView: View {
     private let store = AgentPreferenceStore(defaults: .standard)
 
     var body: some View {
-        Form {
-            ForEach(AgentRegistry.all, id: \.id) { agent in
-                let prefs = preferences[agent.id] ?? store.preferences(for: agent.id)
-                AgentOptionsView(
-                    title: agent.displayName,
-                    options: agent.options(environment: model.capturedEnvironment ?? [:]),
-                    preferences: prefs,
-                    isForcedOn: { agent.isForcedOn(optionId: $0, preferences: prefs) },
-                    onSet: { optionId, value in
-                        store.set(value, agentId: agent.id, optionId: optionId)
-                        preferences[agent.id] = store.preferences(for: agent.id)
-                    })
-            }
-            Section("General") {
-                Toggle("Restore sessions on launch", isOn: $restoreSessions)
-            }
+        let environment = model.capturedEnvironment ?? ProcessInfo.processInfo.environment
+        SettingsScreen(
+            agents: AgentRegistry.all.map { agent in
+                SettingsAgentPage(
+                    id: agent.id, name: agent.displayName, glyph: agent.glyph,
+                    location: agent.executable.locate(environment: environment).map(Self.abbreviatingHome),
+                    missingHint: "Not found. Install \(agent.executable.name) or set \(agent.executable.overrideVariable).",
+                    options: agent.options(environment: model.capturedEnvironment ?? [:]))
+            },
+            preferences: { preferences[$0] ?? store.preferences(for: $0) },
+            isForcedOn: { agentId, optionId in
+                AgentRegistry.agent(id: agentId)?.isForcedOn(
+                    optionId: optionId, preferences: preferences[agentId] ?? store.preferences(for: agentId)) ?? false
+            },
+            onSet: { agentId, optionId, value in
+                store.set(value, agentId: agentId, optionId: optionId)
+                preferences[agentId] = store.preferences(for: agentId)
+            }) {
             Section {
-                Text("Applies to new sessions. Running sessions keep their settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Toggle(isOn: $restoreSessions) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Restore sessions on launch")
+                        Text("Sessions open when AgentMaster quits come back, resuming their conversations.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
         }
-        .formStyle(.grouped)
-        .frame(width: 560)
-        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private static func abbreviatingHome(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
     }
 }

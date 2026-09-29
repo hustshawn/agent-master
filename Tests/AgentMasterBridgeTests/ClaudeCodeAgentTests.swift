@@ -72,7 +72,7 @@ final class ClaudeCodeAgentTests: XCTestCase {
         XCTAssertTrue(allowsCustom)
         guard case let .choice(modes, modesCustom) = options[1].kind else { return XCTFail("mode is a choice") }
         XCTAssertEqual(modes.map(\.value), ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"])
-        XCTAssertEqual(modes[0].label, "manual (default)")
+        XCTAssertEqual(modes.map(\.label), ["Manual (default)", "Accept edits", "Plan", "Auto", "Don't ask", "Bypass permissions"])
         XCTAssertFalse(modesCustom)
         XCTAssertEqual(options[2].kind, .toggle(default: true))
     }

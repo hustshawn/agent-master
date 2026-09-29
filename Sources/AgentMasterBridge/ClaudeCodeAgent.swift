@@ -26,12 +26,17 @@ public struct ClaudeCodeAgent: AgentKind {
                 Self.modelAliases.map { AgentChoice(value: $0, detail: environment["ANTHROPIC_DEFAULT_\($0.uppercased())_MODEL"]) },
                 allowsCustom: true)),
             AgentOption(id: Self.permissionModeOption, title: "Default permission mode", kind: .choice(
-                Self.permissionModes.map { AgentChoice(value: $0, label: $0 == "manual" ? "manual (default)" : nil) },
+                Self.permissionModes.map { AgentChoice(value: $0, label: Self.permissionModeLabels[$0]) },
                 allowsCustom: false)),
-            AgentOption(id: Self.allowBypassOption, title: "Allow switching to bypass permissions in a session",
-                        kind: .toggle(default: true)),
+            AgentOption(id: Self.allowBypassOption, title: "Allow bypass permissions",
+                        kind: .toggle(default: true), note: "Lets a running session switch to bypass permissions."),
         ]
     }
+
+    static let permissionModeLabels = [
+        "manual": "Manual (default)", "acceptEdits": "Accept edits", "plan": "Plan", "auto": "Auto",
+        "dontAsk": "Don't ask", "bypassPermissions": "Bypass permissions",
+    ]
 
     public func isForcedOn(optionId: String, preferences: AgentPreferences) -> Bool {
         optionId == Self.allowBypassOption && preferences.string(Self.permissionModeOption) == "bypassPermissions"

@@ -27,15 +27,20 @@ public struct CodexAgent: AgentKind {
         [
             AgentOption(id: Self.modelOption, title: "Default model", kind: .choice([], allowsCustom: true)),
             AgentOption(id: Self.sandboxOption, title: "Default sandbox", kind: .choice(
-                Self.sandboxModes.map { AgentChoice(value: $0) }, allowsCustom: false)),
+                Self.sandboxModes.map { AgentChoice(value: $0, label: Self.labels[$0]) }, allowsCustom: false)),
             AgentOption(id: Self.approvalOption, title: "Default approval policy", kind: .choice(
-                Self.approvalPolicies.map { AgentChoice(value: $0) }, allowsCustom: false)),
+                Self.approvalPolicies.map { AgentChoice(value: $0, label: Self.labels[$0]) }, allowsCustom: false)),
             // Codex runs only hooks the user has trusted in its own UI, and there is no way to trust one
             // from the command line, so AgentMaster's hooks need the bypass flag.
-            AgentOption(id: Self.hooksOption, title: "Show session activity in panels (bypasses Codex hook trust)",
-                        kind: .toggle(default: true)),
+            AgentOption(id: Self.hooksOption, title: "Show session activity in panels", kind: .toggle(default: true),
+                        note: "Bypasses Codex hook trust, so hooks from a project's own Codex config also run without asking."),
         ]
     }
+
+    static let labels = [
+        "read-only": "Read only", "workspace-write": "Workspace write", "danger-full-access": "Full access (no sandbox)",
+        "on-request": "On request", "never": "Never ask",
+    ]
 
     public func hooksEnabled(preferences: AgentPreferences) -> Bool {
         preferences.bool(Self.hooksOption, default: true)

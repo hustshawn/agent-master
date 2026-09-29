@@ -109,23 +109,20 @@ public enum SessionGrouping {
 public struct SessionSidebar: View {
     let rows: [SessionRowModel]
     @Binding var selection: String?
-    let recentProjects: [String]
-    let onNewIn: (String) -> Void
-    let onChooseFolder: () -> Void
+    /// A ＋ was clicked: the project's path, or nil for the bottom one.
+    let onNewSession: (String?) -> Void
     let onClose: (String) -> Void
     let onRename: (String, String) -> Void
     /// Project paths whose rows are hidden; kept for this run only.
     @State private var collapsed: Set<String> = []
     @State private var rename = RenameState()
 
-    public init(rows: [SessionRowModel], selection: Binding<String?>, recentProjects: [String],
-                onNewIn: @escaping (String) -> Void, onChooseFolder: @escaping () -> Void,
+    public init(rows: [SessionRowModel], selection: Binding<String?>,
+                onNewSession: @escaping (String?) -> Void,
                 onClose: @escaping (String) -> Void, onRename: @escaping (String, String) -> Void) {
         self.rows = rows
         self._selection = selection
-        self.recentProjects = recentProjects
-        self.onNewIn = onNewIn
-        self.onChooseFolder = onChooseFolder
+        self.onNewSession = onNewSession
         self.onClose = onClose
         self.onRename = onRename
     }
@@ -150,20 +147,12 @@ public struct SessionSidebar: View {
                 .padding(.top, 28)   // clears the traffic lights in the hidden title bar
             }
             HairLine()
-            Menu {
-                ForEach(recentProjects, id: \.self) { path in
-                    Button((path as NSString).lastPathComponent) { onNewIn(path) }
-                        .help(path)
-                }
-                if !recentProjects.isEmpty { Divider() }
-                Button("Choose Folder…", action: onChooseFolder)
-            } label: {
+            Button { onNewSession(nil) } label: {
                 Text("＋ New session").font(MuseFont.body).foregroundStyle(Palette.accent)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
             .padding(10)
         }
         .background(Palette.bg)
@@ -186,7 +175,7 @@ public struct SessionSidebar: View {
             }
             .buttonStyle(.plain)
             .help(group.id)
-            Button { onNewIn(group.id) } label: {
+            Button { onNewSession(group.id) } label: {
                 Text("＋").font(MuseFont.groupHeading).foregroundStyle(Palette.muted)
                     .contentShape(Rectangle())
             }

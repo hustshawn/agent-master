@@ -75,7 +75,7 @@ public struct ClaudeCodeAgent: AgentKind {
 }
 
 public enum AgentRegistry {
-    public static let all: [any AgentKind] = [ClaudeCodeAgent()]
+    public static let all: [any AgentKind] = [ClaudeCodeAgent(), CodexAgent()]
     public static var defaultAgent: any AgentKind { all[0] }
 
     public static func agent(id: String) -> (any AgentKind)? {

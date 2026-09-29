@@ -173,4 +173,11 @@ final class AgentMasterUITests: XCTestCase {
         XCTAssertNil(rename.editingId)
         XCTAssertNil(rename.commit("r1"))
     }
+
+    func testNewSessionModelIsNilForTheDefaultRowOrABlankCustomField() {
+        XCTAssertNil(NewSessionForm.model(tag: AgentChoiceSelection.followTag, custom: "ignored"))
+        XCTAssertEqual(NewSessionForm.model(tag: "sonnet", custom: ""), "sonnet")
+        XCTAssertEqual(NewSessionForm.model(tag: AgentChoiceSelection.customTag, custom: " gpt-5 "), "gpt-5")
+        XCTAssertNil(NewSessionForm.model(tag: AgentChoiceSelection.customTag, custom: "  "))
+    }
 }

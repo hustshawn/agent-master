@@ -9,14 +9,26 @@
 [![Release](https://github.com/hustshawn/agent-master/actions/workflows/release.yml/badge.svg)](https://github.com/hustshawn/agent-master/actions/workflows/release.yml)
 [![Download](https://img.shields.io/badge/download-latest-blue)](https://github.com/hustshawn/agent-master/releases/latest)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
+![Web edition: Linux](https://img.shields.io/badge/web%20edition-Linux%20x86__64%20%7C%20arm64-FCC624?logo=linux&logoColor=black)
 ![Swift 5.10+](https://img.shields.io/badge/Swift-5.10%2B-F05138?logo=swift&logoColor=white)
 ![Apple silicon](https://img.shields.io/badge/arch-Apple%20silicon-555)
 ![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex-D97757)
 [![License: proprietary](https://img.shields.io/badge/license-proprietary-lightgrey)](LICENSE)
 
-One native macOS app for all your coding-agent CLIs.
+One place to run and manage all your coding-agent CLIs, as a native macOS app or in the browser.
 
 AgentMaster runs each agent's real TUI in an embedded terminal and manages them from one window. You get a session sidebar across projects and agents, live panels for the current session, and per-agent defaults. It does not reimplement any agent. Every CLI keeps its own harness and works exactly as it does in your terminal, with its own config, instructions, skills, MCP servers, hooks and plugins. AgentMaster only adds a thin, per-session layer on top.
+
+## Two editions
+
+| | Mac app | Web edition |
+|---|---|---|
+| What it is | `AgentMaster.app`, a native macOS app | `agentmaster-server`, a server that serves the same UI to a browser |
+| Where the agents run | On your Mac | On the machine the server runs on, usually a remote Linux server |
+| Use it to | Work with agents on your own machine | Run agents on a remote machine, close the browser, and pick the sessions up again from anywhere |
+| Get it | [Download](#download) or [build it](#build-and-run) | [Install on a Linux server](#install-on-a-linux-server) with one command |
+
+Both have the sidebar, the agent's real TUI, the inspector, the new-session panel and Settings, and both support every agent below. The features below describe the Mac app. The web edition's differences are in [Web edition](#web-edition).
 
 ## Supported agents
 
@@ -73,7 +85,7 @@ To try the full release build before tagging, run it by hand (Actions → Releas
 
 ## Web edition
 
-`agentmaster-server` runs the same agents on a remote machine (Linux or macOS) and serves the AgentMaster UI to a browser. It has the sidebar, the real agent TUI in the page (xterm.js), the inspector, the new-session panel and Settings. Sessions live on the server, so closing the browser does not stop an agent. Reconnecting shows the terminal again.
+The web edition is for running agents on a remote server. `agentmaster-server` runs the same agents on that machine (Linux or macOS) and serves the AgentMaster UI to a browser. It has the sidebar, the real agent TUI in the page (xterm.js), the inspector, the new-session panel and Settings. Sessions live on the server, so closing the browser does not stop an agent. Reconnecting shows the terminal again.
 
 ### Install on a Linux server
 

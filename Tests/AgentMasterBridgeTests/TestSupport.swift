@@ -17,9 +17,38 @@ enum Fixtures {
         return try JSONValue.parse(Data(contentsOf: url))
     }
 
-    static func translate(_ name: String) throws -> [SessionEvent] {
-        var translator = HookTranslator()
+    static func translate(_ name: String, dialect: any HookDialect = ClaudeHookDialect()) throws -> [SessionEvent] {
+        var translator = HookTranslator(dialect: dialect)
         return try payloads(name).flatMap { translator.translate($0) }
+    }
+}
+
+/// A scratch install for launch tests: fake agent binaries and an app bundle with or without the hook helper.
+struct FakeInstall {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("am-install-\(UUID().uuidString.prefix(8))")
+
+    /// An executable shell script at `root/bin/<name>`.
+    func executable(_ name: String) throws -> String {
+        try script(root.appendingPathComponent("bin/\(name)"))
+    }
+
+    /// Each variant gets its own bundle so one call's hook helper cannot leak into another's.
+    func paths(withHook: Bool = true) throws -> AppPaths {
+        let bundle = root.appendingPathComponent(withHook ? "AM.app" : "NoHook.app")
+        if withHook { _ = try script(bundle.appendingPathComponent("Contents/Helpers/agentmaster-hook")) }
+        return AppPaths(supportDirectory: root.appendingPathComponent("Support"), bundleURL: bundle,
+                        executableURL: bundle.appendingPathComponent("Contents/MacOS/AgentMaster"))
+    }
+
+    func remove() {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func script(_ url: URL) throws -> String {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("#!/bin/sh\n".utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url.path
     }
 }
 

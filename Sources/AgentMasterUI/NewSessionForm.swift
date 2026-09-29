@@ -5,15 +5,17 @@ import AgentMasterCore
 public struct NewSessionAgent: Identifiable, Equatable {
     public let id: String
     public let name: String
+    public let glyph: AgentGlyphStyle
     public let modelChoices: [AgentChoice]
     public let allowsCustomModel: Bool
     /// The agent's default model from Settings; nil follows the agent's own configuration.
     public let defaultModel: String?
 
-    public init(id: String, name: String, modelChoices: [AgentChoice] = [], allowsCustomModel: Bool = true,
-                defaultModel: String? = nil) {
+    public init(id: String, name: String, glyph: AgentGlyphStyle = .symbol("terminal"), modelChoices: [AgentChoice] = [],
+                allowsCustomModel: Bool = true, defaultModel: String? = nil) {
         self.id = id
         self.name = name
+        self.glyph = glyph
         self.modelChoices = modelChoices
         self.allowsCustomModel = allowsCustomModel
         self.defaultModel = defaultModel
@@ -108,7 +110,7 @@ public struct NewSessionForm: View {
             customModel = ""
         } label: {
             VStack(spacing: 10) {
-                AgentGlyph(agentId: agent.id, size: 44)
+                AgentGlyph(style: agent.glyph, size: 44)
                 Text(agent.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(Palette.text)
                 Text(agent.defaultModel ?? "default model").font(.system(size: 12)).foregroundStyle(Palette.muted)
                     .lineLimit(1).truncationMode(.middle)

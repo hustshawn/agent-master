@@ -2,9 +2,9 @@ import Foundation
 import AgentMasterCore
 import AgentMasterWire
 
-/// Claude Code: hooks injected with `--settings`, so its panels light up through HookTranslator.
+/// Claude Code: hooks and the status line go in a per-session settings file passed with `--settings`.
 public struct ClaudeCodeAgent: AgentKind {
-    public static let modelOption = "model"
+    public static let modelOption = AgentOption.modelId
     public static let permissionModeOption = "permissionMode"
     public static let allowBypassOption = "allowBypass"
     public static let modelAliases = ["opus", "sonnet", "haiku", "fable"]
@@ -13,16 +13,12 @@ public struct ClaudeCodeAgent: AgentKind {
 
     public let id = "claude"
     public let displayName = "Claude Code"
+    /// cmux ships a same-named wrapper that must be skipped.
+    public let executable = ExecutableSpec(name: "claude", overrideVariable: "AGENTMASTER_CLAUDE_PATH", excluding: ["cmux.app"])
+    public let glyph = AgentGlyphStyle.spark(hex: "#D97757")
     public var supportsResume: Bool { true }
 
-    private let locate: @Sendable ([String: String]) -> String?
-    private let transcriptExists: @Sendable (String) -> Bool
-
-    public init(locate: @escaping @Sendable ([String: String]) -> String? = { ClaudeLocator.locate(environment: $0) },
-                transcriptExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) {
-        self.locate = locate
-        self.transcriptExists = transcriptExists
-    }
+    public init() {}
 
     public func options(environment: [String: String]) -> [AgentOption] {
         [
@@ -30,55 +26,39 @@ public struct ClaudeCodeAgent: AgentKind {
                 Self.modelAliases.map { AgentChoice(value: $0, detail: environment["ANTHROPIC_DEFAULT_\($0.uppercased())_MODEL"]) },
                 allowsCustom: true)),
             AgentOption(id: Self.permissionModeOption, title: "Default permission mode", kind: .choice(
-                Self.permissionModes.map { AgentChoice(value: $0, label: $0 == "manual" ? "manual (default)" : nil) },
+                Self.permissionModes.map { AgentChoice(value: $0, label: Self.permissionModeLabels[$0]) },
                 allowsCustom: false)),
-            AgentOption(id: Self.allowBypassOption, title: "Allow switching to bypass permissions in a session",
-                        kind: .toggle(default: true)),
+            AgentOption(id: Self.allowBypassOption, title: "Allow bypass permissions",
+                        kind: .toggle(default: true), note: "Lets a running session switch to bypass permissions."),
         ]
     }
+
+    static let permissionModeLabels = [
+        "manual": "Manual (default)", "acceptEdits": "Accept edits", "plan": "Plan", "auto": "Auto",
+        "dontAsk": "Don't ask", "bypassPermissions": "Bypass permissions",
+    ]
 
     public func isForcedOn(optionId: String, preferences: AgentPreferences) -> Bool {
         optionId == Self.allowBypassOption && preferences.string(Self.permissionModeOption) == "bypassPermissions"
     }
 
-    public func resumeId(from state: SessionState) -> String? {
-        guard let id = state.claudeSessionId,
-              let path = state.transcriptPath,
-              transcriptExists(path) else { return nil }
-        return id
+    public func hooksEnabled(preferences: AgentPreferences) -> Bool { true }
+
+    public func hookArguments(for plan: HookPlan) throws -> [String] {
+        let settings = try plan.writeSessionFile(SessionSettingsBuilder(hookExecutable: plan.hookExecutable).data())
+        return ["--settings", settings.path]
     }
 
-    public static func arguments(settingsPath: String, preferences: AgentPreferences, resumeId: String? = nil) -> [String] {
-        var args = ["--settings", settingsPath]
-        if let model = preferences.string(modelOption) { args += ["--model", model] }
+    public func arguments(preferences: AgentPreferences, hookArguments: [String], resumeId: String?) -> [String] {
+        var args = hookArguments
+        if let model = preferences.string(Self.modelOption) { args += ["--model", model] }
         // An unknown mode would make claude refuse to start; follow its own settings instead.
-        let mode = preferences.string(permissionModeOption).flatMap { permissionModes.contains($0) ? $0 : nil }
+        let mode = preferences.string(Self.permissionModeOption).flatMap { Self.permissionModes.contains($0) ? $0 : nil }
         if let mode { args += ["--permission-mode", mode] }
-        if preferences.bool(allowBypassOption, default: true) || mode == "bypassPermissions" {
+        if preferences.bool(Self.allowBypassOption, default: true) || mode == "bypassPermissions" {
             args.append("--allow-dangerously-skip-permissions")
         }
         if let resumeId { args += ["--resume", resumeId] }
         return args
-    }
-
-    public func launch(_ request: AgentLaunchRequest) throws -> AgentLaunch {
-        guard let claude = locate(request.environment) else { throw AgentLaunchError.claudeNotFound }
-        guard let hook = request.paths.hookExecutable() else { throw AgentLaunchError.hookHelperMissing }
-        let settings = try request.paths.writeSettings(SessionSettingsBuilder(hookExecutable: hook).data(),
-                                                       sessionId: request.sessionId)
-        return AgentLaunch(
-            executable: claude,
-            args: Self.arguments(settingsPath: settings.path, preferences: request.preferences, resumeId: request.resumeId),
-            environment: LaunchEnvironment.sessionEnvironment(base: request.environment, sessionId: request.sessionId,
-                                                             socketPath: request.paths.socketPath))
-    }
-}
-
-public enum AgentRegistry {
-    public static let all: [any AgentKind] = [ClaudeCodeAgent(), CodexAgent()]
-    public static var defaultAgent: any AgentKind { all[0] }
-
-    public static func agent(id: String) -> (any AgentKind)? {
-        all.first { $0.id == id }
     }
 }

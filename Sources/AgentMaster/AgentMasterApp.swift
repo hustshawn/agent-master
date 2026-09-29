@@ -20,6 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+extension AgentShortcut {
+    var modifiers: EventModifiers {
+        var modifiers: EventModifiers = .command
+        if option { modifiers.insert(.option) }
+        if shift { modifiers.insert(.shift) }
+        return modifiers
+    }
+}
+
 @main
 struct AgentMasterApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
@@ -40,9 +49,13 @@ struct AgentMasterApp: App {
                     .keyboardShortcut("n")
                 Button("New Session in Folder…") { delegate.model.chooseProjectAndStart() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
-                if let codex = AgentRegistry.agent(id: "codex") {
-                    Button("New \(codex.displayName) Session") { delegate.model.newSessionInCurrentProject(agent: codex) }
-                        .keyboardShortcut("n", modifiers: [.command, .option])
+                // Agents that declare a shortcut get their own menu item, which skips the new-session panel.
+                ForEach(AgentRegistry.all.indices, id: \.self) { index in
+                    let agent = AgentRegistry.all[index]
+                    if let shortcut = agent.shortcut {
+                        Button("New \(agent.displayName) Session") { delegate.model.newSessionInCurrentProject(agent: agent) }
+                            .keyboardShortcut(KeyEquivalent(shortcut.key), modifiers: shortcut.modifiers)
+                    }
                 }
             }
             CommandGroup(after: .sidebar) {

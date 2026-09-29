@@ -5,7 +5,7 @@ import AgentMasterBridge
 import AgentMasterUI
 import TerminalKit
 
-/// One AgentMaster session: one PTY running claude, its translator and its reduced state.
+/// One AgentMaster session: one PTY running an agent, its translator and its reduced state.
 @MainActor
 @Observable
 final class SessionController: Identifiable {
@@ -20,11 +20,12 @@ final class SessionController: Identifiable {
     /// Set by the user (Rename…) or carried over from the journal when restored.
     var customName: String?
     @ObservationIgnored let terminal: TerminalSession
-    @ObservationIgnored private var translator = HookTranslator()
+    @ObservationIgnored private var translator: HookTranslator
 
-    init(id: String, agentId: String, projectPath: String, resumeHint: String? = nil, launch: TerminalLaunch) {
+    init(id: String, agent: any AgentKind, projectPath: String, resumeHint: String? = nil, launch: TerminalLaunch) {
         self.id = id
-        self.agentId = agentId
+        self.agentId = agent.id
+        translator = HookTranslator(dialect: agent.hookDialect)
         self.projectPath = projectPath
         self.resumeHint = resumeHint
         terminal = TerminalSession(launch: launch)

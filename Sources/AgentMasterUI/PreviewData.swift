@@ -6,7 +6,7 @@ public enum PreviewData {
         let start = Date().addingTimeInterval(-42)
         var state = SessionState()
         let events: [SessionEvent] = [
-            .sessionStarted(claudeSessionId: "preview", cwd: "/Users/me/my-proj", transcriptPath: nil),
+            .sessionStarted(agentSessionId: "preview", cwd: "/Users/me/my-proj", transcriptPath: nil),
             .permissionModeChanged("default"),
             .promptSubmitted(text: "Fix add()"),
             .todosChanged([

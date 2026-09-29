@@ -1,5 +1,4 @@
 import SwiftUI
-import AgentMasterBridge
 import AgentMasterUI
 import TerminalKit
 
@@ -10,12 +9,7 @@ struct MainWindow: View {
     var body: some View {
         HSplitView {
             SessionSidebar(rows: model.sessions.map(\.row), selection: $model.selectedId,
-                           recentProjects: model.recentProjects,
-                           agents: AgentRegistry.all.map { NewSessionAgent(id: $0.id, name: $0.displayName) },
-                           onNewIn: { path, agentId in
-                               model.start(in: path, agent: AgentRegistry.agent(id: agentId) ?? AgentRegistry.defaultAgent)
-                           },
-                           onChooseFolder: { model.chooseProjectAndStart() },
+                           onNewSession: { model.showNewSession(project: $0) },
                            onClose: { model.close($0) },
                            onRename: { model.rename($0, to: $1) })
             .frame(minWidth: 180, idealWidth: 240, maxWidth: 360)

@@ -29,6 +29,7 @@ final class AppModel {
     /// While relaunching the journal's sessions, do not overwrite it with the partial list.
     @ObservationIgnored private var restoring = false
     @ObservationIgnored private var server: HookServer?
+    @ObservationIgnored private let newSessionPanel = NewSessionPanel()
     @ObservationIgnored private var environmentTask: Task<[String: String], Never>?
 
     init() {
@@ -77,23 +78,66 @@ final class AppModel {
     }
 
     func chooseProjectAndStart(agent: any AgentKind = AgentRegistry.defaultAgent) {
+        guard let path = chooseFolder(prompt: "Start Session") else { return }
+        start(in: path, agent: agent)
+    }
+
+    func chooseFolder(prompt: String = "Choose") -> String? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Start Session"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        start(in: url.path, agent: agent)
+        panel.prompt = prompt
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return url.path
     }
 
+    /// Every agent's model choices and current default, for the ＋ popover.
+    func newSessionAgents() -> [NewSessionAgent] {
+        AgentRegistry.all.map { agent in
+            let modelOption = agent.options(environment: capturedEnvironment ?? [:]).first { $0.id == Self.modelOptionId }
+            var choices: [AgentChoice] = []
+            var allowsCustom = false
+            if case let .choice(values, custom)? = modelOption?.kind {
+                choices = values
+                allowsCustom = custom
+            }
+            return NewSessionAgent(id: agent.id, name: agent.displayName, modelChoices: choices, allowsCustomModel: allowsCustom,
+                                   defaultModel: preferenceStore.preferences(for: agent.id).string(Self.modelOptionId))
+        }
+    }
+
+    /// Every ＋: the floating new-session panel, for `project` or (nil) any recent project.
+    func showNewSession(project: String?) {
+        newSessionPanel.show(NewSessionForm(
+            agents: newSessionAgents(), fixedProject: project, projects: recentProjects,
+            chooseFolder: { [weak self] in self?.chooseFolder() },
+            onStart: { [weak self] request in
+                self?.newSessionPanel.close()
+                self?.start(request)
+            },
+            onCancel: { [weak self] in self?.newSessionPanel.close() }))
+    }
+
+    func start(_ request: NewSessionRequest) {
+        let agent = AgentRegistry.agent(id: request.agentId) ?? AgentRegistry.defaultAgent
+        Task { await startSession(in: request.projectPath, agent: agent, model: request.model) }
+    }
+
+    /// Every agent names its model option "model" (ClaudeCodeAgent.modelOption, CodexAgent.modelOption).
+    private static let modelOptionId = "model"
+
+    /// `model` overrides the agent's default model for this launch only.
     @discardableResult
     func startSession(in projectPath: String, agent: any AgentKind = AgentRegistry.defaultAgent,
-                      resumeId: String? = nil, title: String? = nil) async -> String? {
+                      resumeId: String? = nil, title: String? = nil, model: String? = nil) async -> String? {
         do {
             let base = await environment()
             let id = UUID().uuidString
+            var preferences = preferenceStore.preferences(for: agent.id)
+            if let model { preferences.values[Self.modelOptionId] = model }
             let launch = try agent.launch(AgentLaunchRequest(
-                sessionId: id, preferences: preferenceStore.preferences(for: agent.id),
+                sessionId: id, preferences: preferences,
                 environment: base, paths: paths, resumeId: resumeId))
             let session = SessionController(
                 id: id, agentId: agent.id, projectPath: projectPath, resumeHint: resumeId,

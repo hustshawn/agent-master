@@ -106,40 +106,23 @@ public enum SessionGrouping {
     }
 }
 
-/// An agent the sidebar can start a session with. The first one is the default.
-public struct NewSessionAgent: Identifiable, Equatable {
-    public let id: String
-    public let name: String
-
-    public init(id: String, name: String) {
-        self.id = id
-        self.name = name
-    }
-}
-
 public struct SessionSidebar: View {
     let rows: [SessionRowModel]
     @Binding var selection: String?
-    let recentProjects: [String]
-    let agents: [NewSessionAgent]
-    /// (project path, agent id)
-    let onNewIn: (String, String) -> Void
-    let onChooseFolder: () -> Void
+    /// A ＋ was clicked: the project's path, or nil for the bottom one.
+    let onNewSession: (String?) -> Void
     let onClose: (String) -> Void
     let onRename: (String, String) -> Void
     /// Project paths whose rows are hidden; kept for this run only.
     @State private var collapsed: Set<String> = []
     @State private var rename = RenameState()
 
-    public init(rows: [SessionRowModel], selection: Binding<String?>, recentProjects: [String],
-                agents: [NewSessionAgent], onNewIn: @escaping (String, String) -> Void, onChooseFolder: @escaping () -> Void,
+    public init(rows: [SessionRowModel], selection: Binding<String?>,
+                onNewSession: @escaping (String?) -> Void,
                 onClose: @escaping (String) -> Void, onRename: @escaping (String, String) -> Void) {
         self.rows = rows
         self._selection = selection
-        self.recentProjects = recentProjects
-        self.agents = agents
-        self.onNewIn = onNewIn
-        self.onChooseFolder = onChooseFolder
+        self.onNewSession = onNewSession
         self.onClose = onClose
         self.onRename = onRename
     }
@@ -164,20 +147,12 @@ public struct SessionSidebar: View {
                 .padding(.top, 28)   // clears the traffic lights in the hidden title bar
             }
             HairLine()
-            Menu {
-                ForEach(recentProjects, id: \.self) { path in
-                    Button((path as NSString).lastPathComponent) { onNewIn(path, defaultAgentId) }
-                        .help(path)
-                }
-                if !recentProjects.isEmpty { Divider() }
-                Button("Choose Folder…", action: onChooseFolder)
-            } label: {
+            Button { onNewSession(nil) } label: {
                 Text("＋ New session").font(MuseFont.body).foregroundStyle(Palette.accent)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
             .padding(10)
         }
         .background(Palette.bg)
@@ -200,27 +175,15 @@ public struct SessionSidebar: View {
             }
             .buttonStyle(.plain)
             .help(group.id)
-            // Clicking ＋ starts the default agent; its menu picks another one.
-            Menu {
-                ForEach(agents) { agent in
-                    Button(agent.name) { onNewIn(group.id, agent.id) }
-                }
-            } label: {
+            Button { onNewSession(group.id) } label: {
                 Text("＋").font(MuseFont.groupHeading).foregroundStyle(Palette.muted)
                     .contentShape(Rectangle())
-            } primaryAction: {
-                onNewIn(group.id, defaultAgentId)
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+            .buttonStyle(.plain)
             .help("New session in \(group.name)")
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 6)
-    }
-
-    private var defaultAgentId: String {
-        agents.first?.id ?? ""
     }
 
     private func sessionRow(_ row: SessionRowModel) -> some View {

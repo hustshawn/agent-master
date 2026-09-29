@@ -146,4 +146,11 @@ final class ClaudeCodeAgentTests: XCTestCase {
         XCTAssertEqual(AgentRegistry.agent(id: "codex")?.displayName, "Codex")
         XCTAssertNil(AgentRegistry.agent(id: "kiro"))
     }
+
+    func testNewSessionFollowsTheSelectedSessionsAgent() {
+        XCTAssertEqual(AgentRegistry.agentForNewSession(selectedAgentId: "codex").id, "codex")
+        XCTAssertEqual(AgentRegistry.agentForNewSession(selectedAgentId: "claude").id, "claude")
+        XCTAssertEqual(AgentRegistry.agentForNewSession(selectedAgentId: nil).id, "claude", "nothing selected")
+        XCTAssertEqual(AgentRegistry.agentForNewSession(selectedAgentId: "gone").id, "claude", "agent no longer registered")
+    }
 }

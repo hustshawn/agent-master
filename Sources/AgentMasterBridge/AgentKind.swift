@@ -76,6 +76,11 @@ public enum AgentRegistry {
     public static func agent(id: String) -> (any AgentKind)? {
         all.first { $0.id == id }
     }
+
+    /// ⌘N: the selected session's agent, else the default one.
+    public static func agentForNewSession(selectedAgentId: String?) -> any AgentKind {
+        selectedAgentId.flatMap(agent(id:)) ?? defaultAgent
+    }
 }
 
 public enum SessionResume {

@@ -67,8 +67,10 @@ final class AppModel {
         sessions.first { $0.id == selectedId }
     }
 
-    /// ⌘N: another session next to the selected one; the folder picker only when nothing is open.
-    func newSessionInCurrentProject(agent: any AgentKind = AgentRegistry.defaultAgent) {
+    /// ⌘N: another session next to the selected one, running the same agent unless `agent` is given;
+    /// the folder picker only when nothing is open.
+    func newSessionInCurrentProject(agent: (any AgentKind)? = nil) {
+        let agent = agent ?? AgentRegistry.agentForNewSession(selectedAgentId: selected?.agentId)
         guard let project = selected?.projectPath else { return chooseProjectAndStart(agent: agent) }
         start(in: project, agent: agent)
     }

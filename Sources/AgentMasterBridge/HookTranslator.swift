@@ -1,7 +1,8 @@
 import Foundation
 import AgentMasterCore
 
-/// The only place that understands Claude Code hook payloads. One instance per AgentMaster session.
+/// The only place that understands agent hook payloads (Claude Code, and Codex's Claude-shaped hooks).
+/// One instance per AgentMaster session.
 public struct HookTranslator {
     private var sessionId: String?
     private var permissionMode: String?
@@ -33,6 +34,11 @@ public struct HookTranslator {
             if let id = payload["tool_use_id"]?.stringValue, let name = payload["tool_name"]?.stringValue {
                 events.append(.toolStarted(ToolCall(id: id, name: name,
                                                     kind: ToolClassifier.kind(name: name, input: payload["tool_input"] ?? .null))))
+            }
+            // Codex edits files with `apply_patch` through Bash and reports no PostToolUse for it.
+            if payload["tool_name"]?.stringValue == "Bash",
+               let command = payload["tool_input"]?["command"]?.stringValue, command.hasPrefix("apply_patch") {
+                events += PatchParser.changes(fromApplyPatch: command, cwd: payload["cwd"]?.stringValue).map { .fileChanged($0) }
             }
         case "PostToolUse":
             events += toolResultEvents(payload)

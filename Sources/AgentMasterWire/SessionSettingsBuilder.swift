@@ -8,10 +8,10 @@ public struct SessionSettingsBuilder {
         "SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
         "PermissionRequest", "Notification", "Stop", "SubagentStart", "SubagentStop",
     ]
-    static let toolEvents: Set<String> = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"]
-    static let decisionEvents: Set<String> = ["PreToolUse", "PermissionRequest"]
+    public static let toolEvents: Set<String> = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"]
+    public static let decisionEvents: Set<String> = ["PreToolUse", "PermissionRequest"]
     /// Seconds. The shim gives up at 590 so it always answers before Claude Code kills it.
-    static let decisionTimeout = 600
+    public static let decisionTimeout = 600
 
     public let hookExecutable: String
 

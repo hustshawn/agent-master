@@ -10,7 +10,7 @@ public enum SessionStatus: Equatable, Sendable {
 /// Everything the panels show for one session. Pure value type; only `apply` mutates it.
 public struct SessionState: Equatable, Sendable {
     public var status: SessionStatus = .starting
-    public var claudeSessionId: String?
+    public var agentSessionId: String?
     public var cwd: String?
     public var transcriptPath: String?
     public var todos: [TodoItem] = []
@@ -39,8 +39,8 @@ public struct SessionState: Equatable, Sendable {
 
     public mutating func apply(_ event: SessionEvent, at now: Date = Date()) {
         switch event {
-        case let .sessionStarted(claudeSessionId, cwd, transcriptPath):
-            if let current = self.claudeSessionId, current != claudeSessionId {
+        case let .sessionStarted(agentSessionId, cwd, transcriptPath):
+            if let current = self.agentSessionId, current != agentSessionId {
                 // A new conversation in the same process (e.g. /clear): start the panels over.
                 todos = []
                 subagents = []
@@ -50,7 +50,7 @@ public struct SessionState: Equatable, Sendable {
                 lastMessage = nil
                 firstPrompt = nil
             }
-            self.claudeSessionId = claudeSessionId
+            self.agentSessionId = agentSessionId
             self.cwd = cwd
             self.transcriptPath = transcriptPath
             status = .idle

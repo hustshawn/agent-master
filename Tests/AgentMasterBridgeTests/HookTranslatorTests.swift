@@ -8,7 +8,7 @@ final class HookTranslatorTests: XCTestCase {
     func testBasicSession() throws {
         let events = try Fixtures.translate("basic-session")
         XCTAssertEqual(Array(events.prefix(6)), [
-            .sessionStarted(claudeSessionId: "4235ee52-bbf1-433c-92ef-f861de1d754b", cwd: "/private/tmp/ccspike",
+            .sessionStarted(agentSessionId: "4235ee52-bbf1-433c-92ef-f861de1d754b", cwd: "/private/tmp/ccspike",
                             transcriptPath: "/Users/shawn/.claude/projects/-private-tmp-ccspike/4235ee52-bbf1-433c-92ef-f861de1d754b.jsonl"),
             .permissionModeChanged("default"),
             .promptSubmitted(text: "Run exactly these two bash commands one after another: 'echo hello' and 'echo forbidden'. Then report what happened."),
@@ -30,11 +30,11 @@ final class HookTranslatorTests: XCTestCase {
 
     /// Recorded from codex-cli 0.154: a command, then an edit through `apply_patch` (which gets no PostToolUse).
     func testCodexSession() throws {
-        let events = try Fixtures.translate("codex-session")
+        let events = try Fixtures.translate("codex-session", dialect: CodexHookDialect())
         // Unlike Claude's, Codex's SessionStart already carries the permission mode.
         XCTAssertEqual(Array(events.prefix(3)), [
             .permissionModeChanged("bypassPermissions"),
-            .sessionStarted(claudeSessionId: "01a0e8c2-1de6-78d2-9fde-fb5efd13ff48", cwd: "/tmp/cx-hook.dV4Q",
+            .sessionStarted(agentSessionId: "01a0e8c2-1de6-78d2-9fde-fb5efd13ff48", cwd: "/tmp/cx-hook.dV4Q",
                             transcriptPath: "/Users/shawnzh/.codex/sessions/2026/09/29/rollout-2026-09-29T00-03-50-01a0e8c2-1de6-78d2-9fde-fb5efd13ff48.jsonl"),
             .promptSubmitted(text: "Do these in order without asking: 1) run the shell command: echo smoke-done  2) edit app.py so add() returns a + b  3) reply with just the word Finished."),
         ])
@@ -182,11 +182,11 @@ final class HookTranslatorTests: XCTestCase {
         ]
         let perPayload = payloads.map { translator.translate($0) }
         XCTAssertEqual(perPayload[2], [])
-        XCTAssertEqual(perPayload[3], [.sessionStarted(claudeSessionId: "B", cwd: "/p", transcriptPath: nil)])
+        XCTAssertEqual(perPayload[3], [.sessionStarted(agentSessionId: "B", cwd: "/p", transcriptPath: nil)])
         XCTAssertEqual(perPayload[4].first, .todosChanged([TodoItem(id: "2", subject: "New", status: .pending)]))
         perPayload.joined().forEach { state.apply($0) }
         XCTAssertEqual(state.status, .idle)
-        XCTAssertEqual(state.claudeSessionId, "B")
+        XCTAssertEqual(state.agentSessionId, "B")
         XCTAssertEqual(state.todos, [TodoItem(id: "2", subject: "New", status: .pending)])
     }
 

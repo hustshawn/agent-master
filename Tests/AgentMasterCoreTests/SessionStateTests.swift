@@ -8,9 +8,9 @@ final class SessionStateTests: XCTestCase {
     func testTurnLifecycle() {
         var state = SessionState()
         XCTAssertEqual(state.status, .starting)
-        state.apply(.sessionStarted(claudeSessionId: "s1", cwd: "/p", transcriptPath: "/t.jsonl"))
+        state.apply(.sessionStarted(agentSessionId: "s1", cwd: "/p", transcriptPath: "/t.jsonl"))
         XCTAssertEqual(state.status, .idle)
-        XCTAssertEqual(state.claudeSessionId, "s1")
+        XCTAssertEqual(state.agentSessionId, "s1")
         XCTAssertEqual(state.transcriptPath, "/t.jsonl")
         state.apply(.promptSubmitted(text: "hi"))
         XCTAssertEqual(state.status, .running)
@@ -76,17 +76,17 @@ final class SessionStateTests: XCTestCase {
 
     func testNewClaudeSessionIdResetsPanelsButSameIdDoesNot() {
         var state = SessionState()
-        state.apply(.sessionStarted(claudeSessionId: "s1", cwd: "/p", transcriptPath: nil))
+        state.apply(.sessionStarted(agentSessionId: "s1", cwd: "/p", transcriptPath: nil))
         state.apply(.todosChanged([TodoItem(id: "1", subject: "x", status: .pending)]))
-        state.apply(.sessionStarted(claudeSessionId: "s1", cwd: "/p", transcriptPath: nil))
+        state.apply(.sessionStarted(agentSessionId: "s1", cwd: "/p", transcriptPath: nil))
         XCTAssertEqual(state.todos.count, 1)
         state.apply(.subagentStarted(agentId: "a", agentType: "t"))
         state.apply(.fileChanged(FileChange(path: "f", hunks: [])))
-        state.apply(.sessionStarted(claudeSessionId: "s2", cwd: "/p", transcriptPath: nil))
+        state.apply(.sessionStarted(agentSessionId: "s2", cwd: "/p", transcriptPath: nil))
         XCTAssertEqual(state.todos, [])
         XCTAssertEqual(state.subagents, [])
         XCTAssertEqual(state.changes, [])
-        XCTAssertEqual(state.claudeSessionId, "s2")
+        XCTAssertEqual(state.agentSessionId, "s2")
         XCTAssertEqual(state.status, .idle)
     }
 
@@ -100,7 +100,7 @@ final class SessionStateTests: XCTestCase {
         state.apply(.turnFinished(lastMessage: nil))
         state.apply(.needsAttention(message: "x"))
         XCTAssertEqual(state.status, .ended)
-        state.apply(.sessionStarted(claudeSessionId: "s9", cwd: "/p", transcriptPath: nil))
+        state.apply(.sessionStarted(agentSessionId: "s9", cwd: "/p", transcriptPath: nil))
         XCTAssertEqual(state.status, .idle)
         XCTAssertNil(state.endReason)
     }
@@ -135,11 +135,11 @@ final class SessionStateTests: XCTestCase {
 
     func testFirstPromptResetsOnANewConversationOnly() {
         var state = SessionState()
-        state.apply(.sessionStarted(claudeSessionId: "a", cwd: "/p", transcriptPath: nil))
+        state.apply(.sessionStarted(agentSessionId: "a", cwd: "/p", transcriptPath: nil))
         state.apply(.promptSubmitted(text: "hello"))
-        state.apply(.sessionStarted(claudeSessionId: "a", cwd: "/p", transcriptPath: nil))
+        state.apply(.sessionStarted(agentSessionId: "a", cwd: "/p", transcriptPath: nil))
         XCTAssertEqual(state.firstPrompt, "hello")
-        state.apply(.sessionStarted(claudeSessionId: "b", cwd: "/p", transcriptPath: nil))
+        state.apply(.sessionStarted(agentSessionId: "b", cwd: "/p", transcriptPath: nil))
         XCTAssertNil(state.firstPrompt)
     }
 }

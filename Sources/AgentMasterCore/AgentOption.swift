@@ -8,6 +8,9 @@ public struct AgentOption: Equatable, Sendable {
         case toggle(default: Bool)
     }
 
+    /// The id every agent gives its default-model option, so a new session can override it without knowing the agent.
+    public static let modelId = "model"
+
     public let id: String
     public let title: String
     public let kind: Kind
@@ -17,6 +20,16 @@ public struct AgentOption: Equatable, Sendable {
         self.title = title
         self.kind = kind
     }
+}
+
+/// How an agent is drawn in the new-session panel. Outlines only, not the vendors' official artwork.
+public enum AgentGlyphStyle: Equatable, Sendable {
+    /// Rays around a centre in the given colour, like Claude's spark.
+    case spark(hex: String)
+    /// A `>_` prompt in a rounded square.
+    case terminalPrompt
+    /// An SF Symbol name.
+    case symbol(String)
 }
 
 public struct AgentChoice: Equatable, Sendable {

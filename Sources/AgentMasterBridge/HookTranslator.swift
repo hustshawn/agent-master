@@ -1,17 +1,21 @@
 import Foundation
 import AgentMasterCore
 
-/// The only place that understands agent hook payloads (Claude Code, and Codex's Claude-shaped hooks).
-/// One instance per AgentMaster session.
+/// Turns Claude-shaped hook payloads into session events; each agent's HookDialect first maps its own
+/// payloads onto that shape. One instance per AgentMaster session.
 public struct HookTranslator {
+    private let dialect: any HookDialect
     private var sessionId: String?
     private var permissionMode: String?
     /// TaskCreate/TaskUpdate are deltas, so the full list is rebuilt here.
     private var todos: [TodoItem] = []
 
-    public init() {}
+    public init(dialect: any HookDialect = ClaudeHookDialect()) {
+        self.dialect = dialect
+    }
 
-    public mutating func translate(_ payload: JSONValue) -> [SessionEvent] {
+    public mutating func translate(_ raw: JSONValue) -> [SessionEvent] {
+        let payload = dialect.normalize(raw)
         guard let event = payload["hook_event_name"]?.stringValue else { return [] }
         if let id = payload["session_id"]?.stringValue, id != sessionId {
             if sessionId != nil { todos = [] }   // new conversation in the same process (/clear)
@@ -26,7 +30,7 @@ public struct HookTranslator {
 
         switch event {
         case "SessionStart":
-            events.append(.sessionStarted(claudeSessionId: sessionId ?? "", cwd: payload["cwd"]?.stringValue ?? "",
+            events.append(.sessionStarted(agentSessionId: sessionId ?? "", cwd: payload["cwd"]?.stringValue ?? "",
                                           transcriptPath: payload["transcript_path"]?.stringValue))
         case "UserPromptSubmit":
             events.append(.promptSubmitted(text: payload["prompt"]?.stringValue ?? ""))
@@ -34,11 +38,6 @@ public struct HookTranslator {
             if let id = payload["tool_use_id"]?.stringValue, let name = payload["tool_name"]?.stringValue {
                 events.append(.toolStarted(ToolCall(id: id, name: name,
                                                     kind: ToolClassifier.kind(name: name, input: payload["tool_input"] ?? .null))))
-            }
-            // Codex edits files with `apply_patch` through Bash and reports no PostToolUse for it.
-            if payload["tool_name"]?.stringValue == "Bash",
-               let command = payload["tool_input"]?["command"]?.stringValue, command.hasPrefix("apply_patch") {
-                events += PatchParser.changes(fromApplyPatch: command, cwd: payload["cwd"]?.stringValue).map { .fileChanged($0) }
             }
         case "PostToolUse":
             events += toolResultEvents(payload)
@@ -73,6 +72,7 @@ public struct HookTranslator {
         default:
             break
         }
+        events += dialect.fileChanges(in: payload).map { .fileChanged($0) }
         return events
     }
 

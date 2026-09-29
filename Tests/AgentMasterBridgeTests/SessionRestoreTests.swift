@@ -2,17 +2,31 @@ import XCTest
 import AgentMasterCore
 @testable import AgentMasterBridge
 
+/// Claude's resume rule, with every transcript present.
+private struct ResumableAgent: AgentKind {
+    let id = "claude"
+    let displayName = "Resumable"
+    let executable = ExecutableSpec(name: "resumable", overrideVariable: "AM_TEST_RESUMABLE")
+    let glyph = AgentGlyphStyle.symbol("terminal")
+    var supportsResume: Bool { true }
+    func options(environment: [String: String]) -> [AgentOption] { [] }
+    func resumeId(from state: SessionState) -> String? { SessionResume.id(from: state) { _ in true } }
+    func arguments(preferences: AgentPreferences, hookArguments: [String], resumeId: String?) -> [String] { [] }
+}
+
 /// An agent that cannot resume, to prove such sessions are never recorded or restored.
 private struct NoResumeAgent: AgentKind {
     let id = "noresume"
     let displayName = "No Resume"
+    let executable = ExecutableSpec(name: "noresume", overrideVariable: "AM_TEST_NORESUME")
+    let glyph = AgentGlyphStyle.symbol("terminal")
     func options(environment: [String: String]) -> [AgentOption] { [] }
-    func launch(_ request: AgentLaunchRequest) throws -> AgentLaunch { throw AgentLaunchError.claudeNotFound }
+    func arguments(preferences: AgentPreferences, hookArguments: [String], resumeId: String?) -> [String] { [] }
 }
 
 final class SessionRestoreTests: XCTestCase {
     private var root: URL!
-    private let agents: [any AgentKind] = [ClaudeCodeAgent(locate: { _ in nil }, transcriptExists: { _ in true }), NoResumeAgent()]
+    private let agents: [any AgentKind] = [ResumableAgent(), NoResumeAgent()]
 
     override func setUp() {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("am-restore-\(UUID().uuidString.prefix(8))")
@@ -25,7 +39,7 @@ final class SessionRestoreTests: XCTestCase {
     private func state(_ status: SessionStatus, claudeId: String?) -> SessionState {
         var state = SessionState()
         state.status = status
-        state.claudeSessionId = claudeId
+        state.agentSessionId = claudeId
         state.transcriptPath = claudeId.map { "/fake/\($0).jsonl" }
         return state
     }

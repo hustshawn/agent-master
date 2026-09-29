@@ -9,9 +9,7 @@ struct MainWindow: View {
     var body: some View {
         HSplitView {
             SessionSidebar(rows: model.sessions.map(\.row), selection: $model.selectedId,
-                           recentProjects: model.recentProjects,
-                           onNewIn: { model.start(in: $0) },
-                           onChooseFolder: { model.chooseProjectAndStart() },
+                           onNewSession: { model.showNewSession(project: $0) },
                            onClose: { model.close($0) },
                            onRename: { model.rename($0, to: $1) })
             .frame(minWidth: 180, idealWidth: 240, maxWidth: 360)

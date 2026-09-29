@@ -49,7 +49,9 @@ public struct DiffView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(change.hunks.enumerated()), id: \.offset) { _, hunk in
-                    Text("@@ -\(hunk.oldStart),\(hunk.oldLines) +\(hunk.newStart),\(hunk.newLines) @@")
+                    // Codex patches carry no line numbers.
+                    Text(hunk.oldStart == 0 && hunk.newStart == 0 ? "@@"
+                         : "@@ -\(hunk.oldStart),\(hunk.oldLines) +\(hunk.newStart),\(hunk.newLines) @@")
                         .foregroundStyle(Palette.faint)
                         .padding(.vertical, 2)
                     ForEach(Array(hunk.lines.enumerated()), id: \.offset) { _, line in

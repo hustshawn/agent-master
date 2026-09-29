@@ -1,4 +1,5 @@
 import SwiftUI
+import AgentMasterBridge
 import AgentMasterUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -39,6 +40,10 @@ struct AgentMasterApp: App {
                     .keyboardShortcut("n")
                 Button("New Session in Folder…") { delegate.model.chooseProjectAndStart() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
+                if let codex = AgentRegistry.agent(id: "codex") {
+                    Button("New \(codex.displayName) Session") { delegate.model.newSessionInCurrentProject(agent: codex) }
+                        .keyboardShortcut("n", modifiers: [.command, .option])
+                }
             }
             CommandGroup(after: .sidebar) {
                 Button(inspectorCollapsed ? "Show Inspector" : "Hide Inspector") { inspectorCollapsed.toggle() }

@@ -28,6 +28,34 @@ final class HookTranslatorTests: XCTestCase {
         XCTAssertEqual(state.runningTools, [], "the hook-denied command never gets a PostToolUse")
     }
 
+    /// Recorded from codex-cli 0.154: a command, then an edit through `apply_patch` (which gets no PostToolUse).
+    func testCodexSession() throws {
+        let events = try Fixtures.translate("codex-session")
+        // Unlike Claude's, Codex's SessionStart already carries the permission mode.
+        XCTAssertEqual(Array(events.prefix(3)), [
+            .permissionModeChanged("bypassPermissions"),
+            .sessionStarted(claudeSessionId: "01a0e8c2-1de6-78d2-9fde-fb5efd13ff48", cwd: "/tmp/cx-hook.dV4Q",
+                            transcriptPath: "/Users/shawnzh/.codex/sessions/2026/09/29/rollout-2026-09-29T00-03-50-01a0e8c2-1de6-78d2-9fde-fb5efd13ff48.jsonl"),
+            .promptSubmitted(text: "Do these in order without asking: 1) run the shell command: echo smoke-done  2) edit app.py so add() returns a + b  3) reply with just the word Finished."),
+        ])
+        XCTAssertTrue(events.contains(.fileChanged(FileChange(path: "/tmp/cx-hook.dV4Q/app.py", hunks: [
+            DiffHunk(oldStart: 0, oldLines: 2, newStart: 0, newLines: 2, lines: [
+                DiffLine(kind: .context, text: "def add(a, b):"),
+                DiffLine(kind: .removed, text: "    return a - b"),
+                DiffLine(kind: .added, text: "    return a + b"),
+            ]),
+        ]))))
+
+        var state = SessionState()
+        events.forEach { state.apply($0) }
+        XCTAssertEqual(state.firstPrompt, "Do these in order without asking: 1) run the shell command: echo smoke-done  2) edit app.py so add() returns a + b  3) reply with just the word Finished.")
+        XCTAssertEqual(state.changes.map(\.path), ["/tmp/cx-hook.dV4Q/app.py"])
+        XCTAssertEqual(state.runningTools, [], "Stop clears the apply_patch call that never finished")
+        XCTAssertEqual(state.lastMessage, "Finished.")
+        XCTAssertEqual(state.status, .ended)
+        XCTAssertEqual(state.endReason, "other")
+    }
+
     func testTasksEditsFailureAndSubagentSession() throws {
         let start = Date(timeIntervalSince1970: 0)
         let events = try Fixtures.translate("session-tasks-edit-agent")

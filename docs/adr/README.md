@@ -15,3 +15,4 @@
 | [0008](0008-app-icon.md) | App 图标：A 与 M 交织的几何字母组合 | 已接受 |
 | [0009](0009-codex-agent.md) | 接入 Codex CLI 作为第二个 agent | 已接受 |
 | [0010](0010-agent-adapter.md) | Agent 适配层：每个 agent 只描述自己的差异 | 已接受 |
+| [0011](0011-web-edition.md) | Web 版：agentmaster-server + 浏览器界面 | 已接受 |

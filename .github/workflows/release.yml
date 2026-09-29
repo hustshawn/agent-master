@@ -1,15 +1,21 @@
-# Pushing a tag like v0.2.0 tests, bundles and publishes AgentMaster-v0.2.0.dmg as a GitHub release.
+# Pushing a tag like v0.2.0 tests everything and publishes a GitHub release with:
+#   AgentMaster-v0.2.0.dmg                                 the Mac app
+#   agentmaster-server-v0.2.0-linux-{x86_64,aarch64}.tar.gz  the web edition's server, Swift runtime linked in
+#   install-server.sh                                      installs or upgrades the server on a Linux machine
+# Pull requests only run the tests (ci.yml). To try the full release build before tagging, run this workflow
+# by hand (Actions → Release → Run workflow): it builds and packages everything and publishes nothing.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  app:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
@@ -25,23 +31,73 @@ jobs:
         run: swift test
 
       - name: Bundle
-        run: VERSION="${GITHUB_REF_NAME#v}" BUILD_NUMBER="$GITHUB_RUN_NUMBER" ./scripts/bundle.sh
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then TAG="$GITHUB_REF_NAME"; else TAG=v0.0.0; fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          VERSION="${TAG#v}" BUILD_NUMBER="$GITHUB_RUN_NUMBER" ./scripts/bundle.sh
 
       - name: Disk image
-        run: ./scripts/make-dmg.sh "AgentMaster-$GITHUB_REF_NAME.dmg"
+        run: ./scripts/make-dmg.sh "AgentMaster-$TAG.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: AgentMaster-*.dmg
+
+  server:
+    strategy:
+      # Report each architecture on its own instead of cancelling the other on the first failure.
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    container: swift:6.2-noble
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Test
+        run: swift test
+
+      - name: Package
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then TAG="$GITHUB_REF_NAME"; else TAG=v0.0.0; fi
+          scripts/package-server.sh "build/agentmaster-server-$TAG-linux-$(uname -m)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.runner }}
+          path: build/agentmaster-server-*.tar.gz
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [app, server]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "AgentMaster-$GITHUB_REF_NAME.dmg" \
+          ls -la dist
+          gh release create "$GITHUB_REF_NAME" dist/* scripts/install-server.sh \
             --title "AgentMaster $GITHUB_REF_NAME" --generate-notes --notes "$(cat <<'EOF'
-          Apple silicon, macOS 14 or later. Open the disk image and drag AgentMaster to Applications.
-
+          **Mac app**: Apple silicon, macOS 14 or later. Open the disk image and drag AgentMaster to Applications.
           The app is ad-hoc signed, not notarized, so macOS blocks it on first open. After copying it to Applications, run:
 
           ```
           xattr -dr com.apple.quarantine /Applications/AgentMaster.app
+          ```
+
+          **Web edition server**: Linux x86_64 or aarch64, no Swift needed. On the server, as the user who runs `claude`/`codex`:
+
+          ```
+          gh release download -R hustshawn/agent-master -p install-server.sh -O - | bash
           ```
           EOF
           )"

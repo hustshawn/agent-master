@@ -1,0 +1,97 @@
+# Tests on pull requests and on main. Builds nothing for release: packaging and the arm64 build live in
+# release.yml, which runs on tags (or by hand). Only the side a change can affect is tested:
+#   docs and Markdown only     → nothing
+#   Mac app only               → macOS
+#   web edition server only    → Linux x86_64
+#   anything else (shared code, Package.swift, workflows) → both
+# Runs on main too, so its .build caches are there for every new pull request to start from.
+name: CI
+
+on:
+  pull_request:
+    paths-ignore: ["docs/**", "**/*.md"]
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**/*.md"]
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      mac: ${{ steps.pick.outputs.mac }}
+      linux: ${{ steps.pick.outputs.linux }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - id: pick
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mac=false linux=false
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            mac=true linux=true   # a new branch or a force-push: nothing reliable to compare with
+          else
+            while read -r file; do
+              case "$file" in
+                "") ;;
+                docs/*|*.md) ;;
+                Sources/AgentMaster/*|Sources/AgentMasterUI/*|Sources/TerminalKit/*|Tests/AgentMasterUITests/*|\
+                Tests/TerminalKitTests/*|Assets/*|scripts/bundle.sh|scripts/make-dmg.sh|scripts/make-icon.swift|scripts/smoke.py)
+                  mac=true ;;
+                Sources/AgentMasterServerKit/*|Sources/CPTY/*|Sources/agentmaster-server/*|Tests/AgentMasterServerTests/*|\
+                scripts/package-server.sh|scripts/install-server.sh|scripts/web-*)
+                  linux=true ;;
+                *) mac=true linux=true ;;
+              esac
+            done < <(git diff --name-only "$BASE" "$HEAD")
+          fi
+          echo "mac=$mac" >> "$GITHUB_OUTPUT"
+          echo "linux=$linux" >> "$GITHUB_OUTPUT"
+          echo "macOS tests: $mac · Linux tests: $linux"
+
+  mac:
+    needs: changes
+    if: needs.changes.outputs.mac == 'true'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain
+        id: toolchain
+        run: |
+          xcodebuild -version
+          # Xcode 26 and later ship the Metal toolchain separately; SwiftTerm compiles a Metal shader.
+          xcodebuild -downloadComponent MetalToolchain
+          # The runner image pins Xcode, so it is part of the cache key (ImageVersion is the runner's own variable).
+          echo "image=$ImageVersion" >> "$GITHUB_OUTPUT"
+
+      # Keyed on the runner image and the resolved dependencies; a partial match still saves recompiling
+      # the dependencies that did not change.
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-macos-${{ runner.arch }}-${{ steps.toolchain.outputs.image }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-macos-${{ runner.arch }}-${{ steps.toolchain.outputs.image }}-
+
+      - name: Test
+        run: swift test
+
+  linux:
+    needs: changes
+    if: needs.changes.outputs.linux == 'true'
+    runs-on: ubuntu-24.04
+    container: swift:6.2-noble
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-linux-x86_64-swift-6.2-noble-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-linux-x86_64-swift-6.2-noble-
+
+      - name: Test
+        run: swift test

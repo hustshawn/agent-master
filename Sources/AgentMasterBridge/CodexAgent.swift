@@ -81,15 +81,23 @@ public struct CodexAgent: AgentKind {
     }
 }
 
-/// Codex's payloads already match Claude's, except that it edits files with `apply_patch` through Bash
-/// and reports no PostToolUse for it, so the change is read from the PreToolUse command.
+/// Codex's payloads already match Claude's, except for how edits are reported:
+/// - 0.154 runs `apply_patch <<'PATCH' …` through Bash and sends no PostToolUse, so the PreToolUse command is read.
+/// - 0.158 has its own `apply_patch` tool whose input is the bare patch, with a PostToolUse once it applied.
 public struct CodexHookDialect: HookDialect {
     public init() {}
 
     public func fileChanges(in payload: JSONValue) -> [FileChange] {
-        guard payload["hook_event_name"]?.stringValue == "PreToolUse", payload["tool_name"]?.stringValue == "Bash",
-              let command = payload["tool_input"]?["command"]?.stringValue, command.hasPrefix("apply_patch")
-        else { return [] }
+        guard let command = payload["tool_input"]?["command"]?.stringValue else { return [] }
+        let event = payload["hook_event_name"]?.stringValue
+        switch payload["tool_name"]?.stringValue {
+        case "Bash" where event == "PreToolUse" && command.hasPrefix("apply_patch"):
+            break
+        case "apply_patch" where event == "PostToolUse":
+            break
+        default:
+            return []
+        }
         return PatchParser.changes(fromApplyPatch: command, cwd: payload["cwd"]?.stringValue)
     }
 }

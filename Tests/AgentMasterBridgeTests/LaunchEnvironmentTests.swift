@@ -108,8 +108,22 @@ final class LaunchEnvironmentTests: XCTestCase {
         // kill(pid, 0) still succeeds on a zombie, so this also checks the shell was reaped.
         XCTAssertTrue(kill(pids[0], 0) != 0, "the shell must be killed and reaped")
         let deadline = Date().addingTimeInterval(2)   // the orphaned child is reaped by launchd
-        while kill(pids[1], 0) == 0 && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        XCTAssertTrue(kill(pids[1], 0) != 0, "the shell's children must be killed too")
+        while !Self.isDead(pids[1]) && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        XCTAssertTrue(Self.isDead(pids[1]), "the shell's children must be killed too")
+    }
+
+    /// Gone, or a zombie nobody reaps: a container whose PID 1 does not reap orphans (GitHub's container jobs
+    /// run `tail -f /dev/null`) leaves the killed child as a zombie, which kill(pid, 0) still reports as alive.
+    private static func isDead(_ pid: pid_t) -> Bool {
+        if kill(pid, 0) != 0 { return true }
+        #if os(Linux)
+        // /proc/<pid>/stat: "pid (comm) state …"; the state follows the last ')'.
+        if let stat = try? String(contentsOfFile: "/proc/\(pid)/stat", encoding: .utf8),
+           let close = stat.lastIndex(of: ")") {
+            return stat[stat.index(after: close)...].trimmingCharacters(in: .whitespaces).hasPrefix("Z")
+        }
+        #endif
+        return false
     }
 
     func testCaptureRealLoginShell() {

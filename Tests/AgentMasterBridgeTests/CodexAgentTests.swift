@@ -128,4 +128,21 @@ final class CodexAgentTests: XCTestCase {
                                "tool_input": ["command": .string(patch)]]
         XCTAssertEqual(CodexHookDialect().fileChanges(in: post), [], "only the PreToolUse carries it")
     }
+
+    /// Recorded from codex-cli 0.158: `apply_patch` is its own tool, with the bare patch and a PostToolUse.
+    func testTheApplyPatchToolIsReadOnceItApplied() {
+        let patch = "*** Begin Patch\n*** Update File: /p/app.py\n@@\n def add(a, b):\n-    return a - b\n+    return a + b\n*** End Patch\n"
+        let input: JSONValue = ["command": .string(patch)]
+        let pre: JSONValue = ["hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": "/p", "tool_input": input]
+        let post: JSONValue = ["hook_event_name": "PostToolUse", "tool_name": "apply_patch", "cwd": "/p", "tool_input": input,
+                               "tool_response": "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nM /p/app.py\n"]
+        XCTAssertEqual(CodexHookDialect().fileChanges(in: pre), [], "not before it applied")
+        XCTAssertEqual(CodexHookDialect().fileChanges(in: post), [FileChange(path: "/p/app.py", hunks: [
+            DiffHunk(oldStart: 0, oldLines: 2, newStart: 0, newLines: 2, lines: [
+                DiffLine(kind: .context, text: "def add(a, b):"),
+                DiffLine(kind: .removed, text: "    return a - b"),
+                DiffLine(kind: .added, text: "    return a + b"),
+            ]),
+        ])])
+    }
 }

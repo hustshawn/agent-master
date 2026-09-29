@@ -49,7 +49,7 @@ public struct AppPaths {
         try? FileManager.default.removeItem(at: supportDirectory.appendingPathComponent("sessions"))
     }
 
-    private func sessionDirectory(_ sessionId: String) -> URL {
+    public func sessionDirectory(_ sessionId: String) -> URL {
         supportDirectory.appendingPathComponent("sessions").appendingPathComponent(sessionId)
     }
 

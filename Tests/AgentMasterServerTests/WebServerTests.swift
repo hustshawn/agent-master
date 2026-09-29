@@ -77,6 +77,37 @@ final class WebServerTests: XCTestCase {
         }
     }
 
+    func testAnUploadedImageIsSavedWithTheSessionUntilItCloses() async throws {
+        let project = SessionManager.realPath(root.appendingPathComponent("project").path)
+        let session = try manager.create(projectPath: project, agentId: "claude")
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        try await app().test(.router) { client in
+            let path = try await client.execute(uri: "/api/sessions/\(session.id)/images", method: .post,
+                                                headers: [.authorization: "Bearer secret", .contentType: "image/png"],
+                                                body: ByteBuffer(bytes: png)) {
+                XCTAssertEqual($0.status, .ok)
+                return try JSONDecoder().decode([String: String].self, from: Data(buffer: $0.body))["path"] ?? ""
+            }
+            XCTAssertTrue(path.hasSuffix(".png"))
+            XCTAssertEqual(FileManager.default.contents(atPath: path), png)
+
+            try await client.execute(uri: "/api/sessions/\(session.id)/images", method: .post,
+                                     headers: [.authorization: "Bearer secret", .contentType: "text/plain"],
+                                     body: ByteBuffer(string: "hi")) { XCTAssertEqual($0.status, .badRequest) }
+            try await client.execute(uri: "/api/sessions/nope/images", method: .post,
+                                     headers: [.authorization: "Bearer secret", .contentType: "image/png"],
+                                     body: ByteBuffer(bytes: png)) { XCTAssertEqual($0.status, .badRequest) }
+            try await client.execute(uri: "/api/sessions/\(session.id)/images", method: .post,
+                                     headers: [.authorization: "Bearer secret", .contentType: "image/png"],
+                                     body: ByteBuffer(repeating: 0, count: WebServer.maxImageBytes + 1)) {
+                XCTAssertEqual($0.status, .contentTooLarge)
+            }
+
+            try manager.close(id: session.id)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+        }
+    }
+
     func testAMissingFolderIsABadRequestWithAMessage() async throws {
         try await app().test(.router) { client in
             try await client.execute(uri: "/api/sessions", method: .post, headers: self.auth,

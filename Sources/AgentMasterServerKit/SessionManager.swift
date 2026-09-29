@@ -16,12 +16,14 @@ public enum SessionManagerError: Error, CustomStringConvertible {
     case notADirectory(String)
     case unknownAgent(String)
     case unknownSession(String)
+    case unsupportedImage(String)
 
     public var description: String {
         switch self {
         case .notADirectory(let path): return "\(path) is not a folder on the server."
         case .unknownAgent(let id): return "Unknown agent \(id)."
         case .unknownSession(let id): return "Unknown session \(id)."
+        case .unsupportedImage(let type): return "\(type.isEmpty ? "This file" : type) is not a PNG, JPEG, GIF or WebP image."
         }
     }
 }
@@ -146,6 +148,19 @@ public final class SessionManager: @unchecked Sendable {
         guard let session = session(id: id) else { throw SessionManagerError.unknownSession(id) }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         session.customName = trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Saves an image pasted in the browser into the session's directory, which goes away with the session,
+    /// and returns its path. Pasting that path into the agent attaches the image, like a local clipboard paste.
+    public func saveImage(sessionId id: String, data: Data, contentType: String) throws -> String {
+        guard session(id: id) != nil else { throw SessionManagerError.unknownSession(id) }
+        let extensions = ["image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"]
+        guard let ext = extensions[contentType] else { throw SessionManagerError.unsupportedImage(contentType) }
+        let directory = paths.sessionDirectory(id).appendingPathComponent("images")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("\(UUID().uuidString.prefix(8).lowercased()).\(ext)")
+        try data.write(to: url)
+        return url.path
     }
 
     public func close(id: String) throws {

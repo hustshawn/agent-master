@@ -5,13 +5,13 @@ import SwiftTerm
 /// sessions in the UI never restarts the process.
 @MainActor
 public final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
-    public let view: LocalProcessTerminalView
+    public let view: AgentTerminalView
     public var onExit: ((Int32?) -> Void)?
     public var onTitle: ((String) -> Void)?
     public private(set) var isRunning = false
 
     public init(launch: TerminalLaunch) {
-        view = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        view = AgentTerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
         super.init()
         TerminalPalette.apply(to: view)
         view.processDelegate = self

@@ -283,6 +283,15 @@ function showTerminal(session) {
     state.terminals.set(session.id, entry);
     term.onData((data) => send(entry, { type: "input", data }));
     term.onResize(({ cols, rows }) => send(entry, { type: "resize", columns: cols, rows }));
+    // An image-only paste becomes Ctrl+V, on which the agent reads the image from the clipboard itself;
+    // Codex ignores the empty paste xterm would send.
+    node.addEventListener("paste", (event) => {
+      const data = event.clipboardData;
+      if (!data || data.getData("text/plain") || ![...data.items].some((item) => item.type.startsWith("image/"))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      send(entry, { type: "input", data: "\x16" });
+    }, true);
     new ResizeObserver(() => { if (!node.hidden) fitTerminal(entry); }).observe(node);
     connectTerminal(entry);
   }

@@ -38,11 +38,23 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
   | Claude Code | `AGENTMASTER_CLAUDE_PATH` | `~/.local/bin/claude`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
   | Codex CLI 0.154 or later | `AGENTMASTER_CODEX_PATH` | `~/.local/bin/codex`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
 
+## Download
+
+Each tagged version is published on the [Releases](https://github.com/hustshawn/agent-master/releases) page as `AgentMaster-<tag>.zip`, built for Apple silicon. The app is ad-hoc signed and not notarized, so after moving it to Applications run `xattr -dr com.apple.quarantine /Applications/AgentMaster.app` before the first launch.
+
 ## Build and run
 
 ```bash
 ./scripts/bundle.sh          # builds build/AgentMaster.app (ad-hoc signed)
 open build/AgentMaster.app
+```
+
+### Releasing
+
+Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests, bundles with the tag as the version, and creates the GitHub release with the zip attached:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 ## Development

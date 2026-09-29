@@ -19,6 +19,7 @@ public enum AgentChoiceSelection {
 /// `onSet(optionId, nil)` clears a value, which means "follow the agent's own settings".
 public struct AgentOptionsView: View {
     let title: String
+    let sectionTitle: String?
     let options: [AgentOption]
     let preferences: AgentPreferences
     let isForcedOn: (String) -> Bool
@@ -26,9 +27,11 @@ public struct AgentOptionsView: View {
     /// Options whose Custom… row is picked while the text field is still empty.
     @State private var customActive: Set<String> = []
 
-    public init(title: String, options: [AgentOption], preferences: AgentPreferences,
+    /// `title` is the agent's name, used in "Follow <title> settings"; `sectionTitle` heads the section (nil for none).
+    public init(title: String, sectionTitle: String? = nil, options: [AgentOption], preferences: AgentPreferences,
                 isForcedOn: @escaping (String) -> Bool, onSet: @escaping (String, String?) -> Void) {
         self.title = title
+        self.sectionTitle = sectionTitle
         self.options = options
         self.preferences = preferences
         self.isForcedOn = isForcedOn
@@ -36,7 +39,7 @@ public struct AgentOptionsView: View {
     }
 
     public var body: some View {
-        Section(title) {
+        Section {
             ForEach(options, id: \.id) { option in
                 switch option.kind {
                 case let .choice(choices, allowsCustom):
@@ -44,6 +47,17 @@ public struct AgentOptionsView: View {
                 case let .toggle(fallback):
                     toggleRow(option, fallback: fallback)
                 }
+            }
+        } header: {
+            if let sectionTitle { Text(sectionTitle) }
+        }
+    }
+
+    private func label(_ option: AgentOption) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(option.title)
+            if let note = option.note {
+                Text(note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -63,9 +77,9 @@ public struct AgentOptionsView: View {
                     onSet(option.id, tag.isEmpty ? nil : tag)
                 }
             })
-        Picker(option.title, selection: selection) {
+        Picker(selection: selection) {
             Text("Follow \(title) settings").tag(AgentChoiceSelection.followTag)
-            Divider()
+            if !choices.isEmpty { Divider() }
             ForEach(choices, id: \.value) { choice in
                 // macOS menu items are plain text, so the detail rides along after a dash.
                 Text(choice.detail.map { "\(choice.label) — \($0)" } ?? choice.label).tag(choice.value)
@@ -74,6 +88,8 @@ public struct AgentOptionsView: View {
                 Divider()
                 Text("Custom…").tag(AgentChoiceSelection.customTag)
             }
+        } label: {
+            label(option)
         }
         if selection.wrappedValue == AgentChoiceSelection.customTag {
             TextField("Custom \(option.title.lowercased())", text: Binding(
@@ -87,9 +103,11 @@ public struct AgentOptionsView: View {
 
     private func toggleRow(_ option: AgentOption, fallback: Bool) -> some View {
         let forced = isForcedOn(option.id)
-        return Toggle(option.title, isOn: Binding(
+        return Toggle(isOn: Binding(
             get: { forced || preferences.bool(option.id, default: fallback) },
-            set: { onSet(option.id, $0 ? "true" : "false") }))
-            .disabled(forced)
+            set: { onSet(option.id, $0 ? "true" : "false") })) {
+            label(option)
+        }
+        .disabled(forced)
     }
 }

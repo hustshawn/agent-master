@@ -3,8 +3,14 @@ import AgentMasterCore
 @testable import AgentMasterBridge
 
 final class CodexAgentTests: XCTestCase {
-    private func args(_ values: [String: String]) -> [String] {
-        CodexAgent.arguments(preferences: AgentPreferences(values: values))
+    private let install = FakeInstall()
+
+    override func tearDown() {
+        install.remove()
+    }
+
+    private func args(_ values: [String: String], hookArguments: [String] = [], resumeId: String? = nil) -> [String] {
+        CodexAgent().arguments(preferences: AgentPreferences(values: values), hookArguments: hookArguments, resumeId: resumeId)
     }
 
     // MARK: arguments
@@ -32,15 +38,15 @@ final class CodexAgentTests: XCTestCase {
     }
 
     func testArgumentOrderIsFixed() {
-        XCTAssertEqual(args(["approval": "never", "sandbox": "read-only", "model": "o3"]),
-                       ["--model", "o3", "--sandbox", "read-only", "--ask-for-approval", "never"])
+        XCTAssertEqual(args(["approval": "never", "sandbox": "read-only", "model": "o3"], hookArguments: ["H"], resumeId: "abc"),
+                       ["resume", "abc", "--model", "o3", "--sandbox", "read-only", "--ask-for-approval", "never", "H"])
     }
 
     // MARK: options
 
     func testOptionsDeclareModelSandboxApprovalAndHooksInOrder() {
         let options = CodexAgent().options(environment: [:])
-        XCTAssertEqual(options.map(\.id), ["model", "sandbox", "approval", "hooks"])
+        XCTAssertEqual(options.map(\.id), [AgentOption.modelId, "sandbox", "approval", "hooks"])
         XCTAssertEqual(options[0].kind, .choice([], allowsCustom: true))
         guard case let .choice(modes, modesCustom) = options[1].kind else { return XCTFail("sandbox is a choice") }
         XCTAssertEqual(modes.map(\.value), ["read-only", "workspace-write", "danger-full-access"])
@@ -54,7 +60,7 @@ final class CodexAgentTests: XCTestCase {
     // MARK: hooks and resume
 
     func testHooksAreInjectedForEveryEventWithTheTrustBypass() {
-        let args = CodexAgent.arguments(preferences: AgentPreferences(), hookCommand: "'/A M/hook' hook")
+        let args = CodexAgent.hookArguments(command: "'/A M/hook' hook")
         XCTAssertEqual(args.first, "--dangerously-bypass-hook-trust")
         let flags = stride(from: 1, to: args.count, by: 2).map { args[$0] }
         let configs = stride(from: 1, to: args.count, by: 2).map { args[$0 + 1] }
@@ -66,79 +72,60 @@ final class CodexAgentTests: XCTestCase {
         XCTAssertTrue(configs.contains(#"hooks.PostToolUse=[{matcher="*",hooks=[{type="command",command="'/A M/hook' hook"}]}]"#))
     }
 
+    func testHooksFollowTheToggle() {
+        XCTAssertTrue(CodexAgent().hooksEnabled(preferences: AgentPreferences()))
+        XCTAssertFalse(CodexAgent().hooksEnabled(preferences: AgentPreferences(values: ["hooks": "false"])))
+    }
+
     func testTomlStringEscapesQuotesAndBackslashes() {
         XCTAssertEqual(CodexAgent.tomlString(#"a "b" \c"#), #""a \"b\" \\c""#)
     }
 
-    func testResumeGoesFirst() {
-        XCTAssertEqual(CodexAgent.arguments(preferences: AgentPreferences(values: ["model": "o3"]), resumeId: "abc"),
-                       ["resume", "abc", "--model", "o3"])
-    }
-
-    func testResumeIdNeedsTheTranscript() {
+    func testResumeIdNeedsTheTranscript() throws {
         var state = SessionState()
-        state.claudeSessionId = "abc"
-        XCTAssertNil(CodexAgent(transcriptExists: { _ in true }).resumeId(from: state))
-        state.transcriptPath = "/x/rollout.jsonl"
-        XCTAssertNil(CodexAgent(transcriptExists: { _ in false }).resumeId(from: state))
-        XCTAssertEqual(CodexAgent(transcriptExists: { _ in true }).resumeId(from: state), "abc")
-        XCTAssertTrue(CodexAgent().supportsResume)
+        state.agentSessionId = "abc"
+        XCTAssertNil(CodexAgent().resumeId(from: state))
+        state.transcriptPath = install.root.appendingPathComponent("gone.jsonl").path
+        XCTAssertNil(CodexAgent().resumeId(from: state))
+        state.transcriptPath = try install.executable("rollout.jsonl")
+        XCTAssertEqual(CodexAgent().resumeId(from: state), "abc")
     }
 
     // MARK: launch
 
-    /// No hook helper in this bundle.
-    private let paths = AppPaths(supportDirectory: URL(fileURLWithPath: "/tmp/am-codex"),
-                                 bundleURL: URL(fileURLWithPath: "/tmp/am-codex/AM.app"),
-                                 executableURL: URL(fileURLWithPath: "/tmp/am-codex/AM.app/Contents/MacOS/AgentMaster"))
-
-    func testLaunchUsesTheLocatedCodexAndCleansTheEnvironment() throws {
-        let launch = try CodexAgent(locate: { _ in "/fake/codex" }).launch(AgentLaunchRequest(
+    func testLaunchWithoutHooksUsesTheLocatedCodexAndCleansTheEnvironment() throws {
+        let codex = try install.executable("codex")
+        let launch = try CodexAgent().launch(AgentLaunchRequest(
             sessionId: "S1", preferences: AgentPreferences(values: ["sandbox": "read-only", "hooks": "false"]),
-            environment: ["PATH": "/usr/bin", "CLAUDECODE": "1"], paths: paths, resumeId: "abc"))
-        XCTAssertEqual(launch.executable, "/fake/codex")
+            environment: ["PATH": "/usr/bin", "CLAUDECODE": "1", "AGENTMASTER_CODEX_PATH": codex],
+            paths: try install.paths(withHook: false), resumeId: "abc"))
+        XCTAssertEqual(launch.executable, codex)
         XCTAssertEqual(launch.args, ["resume", "abc", "--sandbox", "read-only"])
         XCTAssertEqual(launch.environment["AGENTMASTER_SESSION_ID"], "S1")
         XCTAssertEqual(launch.environment["PATH"], "/usr/bin")
         XCTAssertNil(launch.environment["CLAUDECODE"])
     }
 
-    func testLaunchFailsWithoutCodexOrWithHooksButNoHelper() {
-        XCTAssertThrowsError(try CodexAgent(locate: { _ in nil }).launch(AgentLaunchRequest(
-            sessionId: "S1", preferences: AgentPreferences(), environment: [:], paths: paths))) {
-            XCTAssertEqual($0 as? AgentLaunchError, .codexNotFound)
-        }
-        XCTAssertThrowsError(try CodexAgent(locate: { _ in "/fake/codex" }).launch(AgentLaunchRequest(
-            sessionId: "S1", preferences: AgentPreferences(), environment: [:], paths: paths))) {
-            XCTAssertEqual($0 as? AgentLaunchError, .hookHelperMissing)
-        }
-    }
-
     func testLaunchInjectsTheBundledHookHelper() throws {
-        let bundle = FileManager.default.temporaryDirectory.appendingPathComponent("am-codex-\(UUID().uuidString.prefix(8)).app")
-        defer { try? FileManager.default.removeItem(at: bundle) }
-        let helpers = bundle.appendingPathComponent("Contents/Helpers")
-        try FileManager.default.createDirectory(at: helpers, withIntermediateDirectories: true)
-        let hook = helpers.appendingPathComponent("agentmaster-hook")
-        try Data("#!/bin/sh\n".utf8).write(to: hook)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
-        let paths = AppPaths(supportDirectory: bundle, bundleURL: bundle,
-                             executableURL: bundle.appendingPathComponent("Contents/MacOS/AgentMaster"))
-        let launch = try CodexAgent(locate: { _ in "/fake/codex" }).launch(AgentLaunchRequest(
-            sessionId: "S1", preferences: AgentPreferences(), environment: [:], paths: paths))
-        XCTAssertEqual(launch.args.first, "--dangerously-bypass-hook-trust")
-        XCTAssertTrue(launch.args.contains { $0.contains("command=\"'\(hook.path)' hook\"") })
+        let paths = try install.paths()
+        let launch = try CodexAgent().launch(AgentLaunchRequest(
+            sessionId: "S1", preferences: AgentPreferences(),
+            environment: ["AGENTMASTER_CODEX_PATH": try install.executable("codex")], paths: paths))
+        let hook = try XCTUnwrap(paths.hookExecutable())
+        XCTAssertEqual(launch.args, CodexAgent.hookArguments(command: "'\(hook)' hook"))
     }
 
-    // MARK: locator
+    // MARK: dialect
 
-    func testLocatorPrefersTheOverrideThenKnownPathsThenPATH() {
-        let env = ["AGENTMASTER_CODEX_PATH": "/custom/codex", "PATH": "/a:/b"]
-        XCTAssertEqual(CodexLocator.locate(environment: env, home: "/h") { $0 == "/custom/codex" || $0 == "/b/codex" },
-                       "/custom/codex")
-        XCTAssertEqual(CodexLocator.locate(environment: env, home: "/h") { $0 == "/h/.local/bin/codex" || $0 == "/b/codex" },
-                       "/h/.local/bin/codex")
-        XCTAssertEqual(CodexLocator.locate(environment: env, home: "/h") { $0 == "/b/codex" }, "/b/codex")
-        XCTAssertNil(CodexLocator.locate(environment: [:], home: "/h") { _ in false })
+    func testApplyPatchInPreToolUseBecomesAFileChange() {
+        let patch = "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: n.txt\n+hi\n*** End Patch\nPATCH"
+        let pre: JSONValue = ["hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": "/p",
+                              "tool_input": ["command": .string(patch)]]
+        XCTAssertEqual(CodexHookDialect().fileChanges(in: pre).map(\.path), ["/p/n.txt"])
+        let otherBash: JSONValue = ["hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": ["command": "ls"]]
+        XCTAssertEqual(CodexHookDialect().fileChanges(in: otherBash), [])
+        let post: JSONValue = ["hook_event_name": "PostToolUse", "tool_name": "Bash", "cwd": "/p",
+                               "tool_input": ["command": .string(patch)]]
+        XCTAssertEqual(CodexHookDialect().fileChanges(in: post), [], "only the PreToolUse carries it")
     }
 }

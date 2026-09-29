@@ -92,18 +92,19 @@ final class AppModel {
         return url.path
     }
 
-    /// Every agent's model choices and current default, for the ＋ popover.
+    /// Every agent's glyph, model choices and current default, for the new-session panel.
     func newSessionAgents() -> [NewSessionAgent] {
         AgentRegistry.all.map { agent in
-            let modelOption = agent.options(environment: capturedEnvironment ?? [:]).first { $0.id == Self.modelOptionId }
+            let modelOption = agent.options(environment: capturedEnvironment ?? [:]).first { $0.id == AgentOption.modelId }
             var choices: [AgentChoice] = []
             var allowsCustom = false
             if case let .choice(values, custom)? = modelOption?.kind {
                 choices = values
                 allowsCustom = custom
             }
-            return NewSessionAgent(id: agent.id, name: agent.displayName, modelChoices: choices, allowsCustomModel: allowsCustom,
-                                   defaultModel: preferenceStore.preferences(for: agent.id).string(Self.modelOptionId))
+            return NewSessionAgent(id: agent.id, name: agent.displayName, glyph: agent.glyph, modelChoices: choices,
+                                   allowsCustomModel: allowsCustom,
+                                   defaultModel: preferenceStore.preferences(for: agent.id).string(AgentOption.modelId))
         }
     }
 
@@ -124,9 +125,6 @@ final class AppModel {
         Task { await startSession(in: request.projectPath, agent: agent, model: request.model) }
     }
 
-    /// Every agent names its model option "model" (ClaudeCodeAgent.modelOption, CodexAgent.modelOption).
-    private static let modelOptionId = "model"
-
     /// `model` overrides the agent's default model for this launch only.
     @discardableResult
     func startSession(in projectPath: String, agent: any AgentKind = AgentRegistry.defaultAgent,
@@ -135,12 +133,12 @@ final class AppModel {
             let base = await environment()
             let id = UUID().uuidString
             var preferences = preferenceStore.preferences(for: agent.id)
-            if let model { preferences.values[Self.modelOptionId] = model }
+            if let model { preferences.values[AgentOption.modelId] = model }
             let launch = try agent.launch(AgentLaunchRequest(
                 sessionId: id, preferences: preferences,
-                environment: base, paths: paths, resumeId: resumeId))
+                environment: base, paths: paths, resumeId: resumeId, projectPath: projectPath))
             let session = SessionController(
-                id: id, agentId: agent.id, projectPath: projectPath, resumeHint: resumeId,
+                id: id, agent: agent, projectPath: projectPath, resumeHint: resumeId,
                 launch: TerminalLaunch(executable: launch.executable, args: launch.args,
                                        environment: launch.environment, currentDirectory: projectPath))
             session.customName = title

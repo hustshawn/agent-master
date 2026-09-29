@@ -4,26 +4,39 @@
 
 # AgentMaster
 
-A native macOS shell for [Claude Code](https://docs.claude.com/en/docs/claude-code/overview).
+One native macOS app for all your coding-agent CLIs.
 
-AgentMaster runs the real Claude Code TUI in an embedded terminal and wraps it in a native UI. It adds a session sidebar across projects, live panels for the current session, and per-agent defaults. It does not reimplement the agent. Claude Code keeps working exactly as it does in your terminal, including `CLAUDE.md`, skills, MCP servers, hooks and plugins.
+AgentMaster runs each agent's real TUI in an embedded terminal and manages them from one window. You get a session sidebar across projects and agents, live panels for the current session, and per-agent defaults. It does not reimplement any agent. Every CLI keeps its own harness and works exactly as it does in your terminal, with its own config, instructions, skills, MCP servers, hooks and plugins. AgentMaster only adds a thin, per-session layer on top.
+
+## Supported agents
+
+| Agent | Status and panels | Restore on launch | Header usage and cost |
+|---|---|---|---|
+| [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) | ✓ via hooks passed with `--settings` | ✓ `claude --resume` | ✓ via the status line |
+| [OpenAI Codex CLI](https://github.com/openai/codex) | ✓ via hooks passed with `-c`, which needs `--dangerously-bypass-hook-trust` ([why](docs/adr/0009-codex-agent.md)) | ✓ `codex resume` | — |
+
+More agents can be added without touching the UI. See [Adding an agent](#adding-an-agent).
 
 ## Features
 
-- **Multiple sessions, grouped by project.** Start sessions from recent folders. Each session is titled by its first prompt, and you can rename it.
-- **Restore on launch.** Sessions that were open when you quit come back with `claude --resume`.
+- **Every agent in one sidebar.** Sessions are grouped by project, whichever agent runs them. Each session is titled by its first prompt, and you can rename it. Sessions from agents other than Claude Code are labelled with the agent's name, for example `Codex · idle`.
+- **New session panel.** Every ＋ opens a panel where you choose the agent and, if you want, a model other than its default. ⌘N starts Claude Code in the current project, and ⌥⌘N starts Codex.
+- **Restore on launch.** Sessions that were open when you quit come back and resume their conversations.
 - **Review inspector.** A collapsible side panel (⌥⌘0) shows todos, subagents and file changes for the selected session.
-- **Header status.** The model, permission mode, context usage and cost are always visible.
-- **Per-agent settings (⌘,).** Set the default model, permission mode and whether bypass is allowed for new sessions.
-- **Codex CLI too.** Every ＋ opens a panel where you pick Claude Code or [OpenAI Codex](https://github.com/openai/codex) and, optionally, a model other than the agent's default; ⌥⌘N starts Codex directly. Its panels and restore work through Codex hooks, which AgentMaster runs with `--dangerously-bypass-hook-trust`; turn that off in Settings to run Codex without hooks.
-- **Non-invasive integration.** Hooks are injected per session through `--settings`. Your global Claude Code configuration is never modified. If AgentMaster isn't running, Claude Code falls back to its normal behaviour.
+- **Header status.** The model and permission mode, plus context usage and cost where the agent reports them.
+- **Per-agent settings (⌘,).** Each agent has its own page. It shows where the binary was found and holds its defaults for new sessions, such as model, permission mode, sandbox and approval policy.
+- **Non-invasive.** Hooks are injected into each session through the agent's own command-line options. AgentMaster never edits your global Claude Code or Codex configuration. If AgentMaster isn't running, every agent behaves as usual.
 
 ## Requirements
 
 - macOS 14 or later
 - Xcode 15.4 (Swift 5.10) or later
-- Claude Code installed at `~/.local/bin/claude`, or anywhere on your login shell's `PATH`. To point at a different binary, set `AGENTMASTER_CLAUDE_PATH`.
-- Optional: Codex CLI 0.154 or later, found the same way (`~/.local/bin/codex`, `PATH`, or `AGENTMASTER_CODEX_PATH`).
+- At least one supported agent. Each is looked up in this order:
+
+  | Agent | Override variable | Then |
+  |---|---|---|
+  | Claude Code | `AGENTMASTER_CLAUDE_PATH` | `~/.local/bin/claude`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
+  | Codex CLI 0.154 or later | `AGENTMASTER_CODEX_PATH` | `~/.local/bin/codex`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
 
 ## Build and run
 
@@ -47,11 +60,23 @@ The code is a single SwiftPM package with these targets:
 |---|---|
 | `AgentMasterCore` | Domain models, session state reducer, theme tokens |
 | `AgentMasterWire` | NDJSON protocol over a Unix socket, hook shim logic |
-| `agentmaster-hook` | Small helper that Claude Code calls as a hook |
-| `AgentMasterBridge` | Agent abstraction, hook translation, launch environment, session restore |
+| `agentmaster-hook` | Small helper that every agent calls as its hook |
+| `AgentMasterBridge` | Agent adapters and registry, hook dialects and translation, launch environment, session restore |
 | `TerminalKit` | SwiftTerm wrapper |
-| `AgentMasterUI` | Sidebar, inspector and header views |
+| `AgentMasterUI` | Sidebar, inspector, header, new-session panel and settings views |
 | `AgentMaster` | The app |
+
+### Adding an agent
+
+Each agent is one file in `Sources/AgentMasterBridge/`. It declares only how its CLI differs:
+
+- where its binary lives
+- its settings
+- how it loads AgentMaster's hooks
+- its other launch arguments
+- how its hook payloads read, if they differ from Claude Code's
+
+Finding the binary, the session environment, resuming, the panels, the new-session panel, Settings and the menus are shared. Add the new agent to `AgentRegistry.all` and it shows up everywhere. The checklist, with a comparison of Claude Code, Codex and Kiro CLI, is in [ADR 0010](docs/adr/0010-agent-adapter.md).
 
 ## Documentation
 

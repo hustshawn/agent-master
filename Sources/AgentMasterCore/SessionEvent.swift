@@ -2,7 +2,7 @@ import Foundation
 
 /// The only vocabulary the UI understands. Produced by the Bridge's HookTranslator.
 public enum SessionEvent: Equatable, Sendable {
-    case sessionStarted(claudeSessionId: String, cwd: String, transcriptPath: String?)
+    case sessionStarted(agentSessionId: String, cwd: String, transcriptPath: String?)
     case promptSubmitted(text: String)
     case toolStarted(ToolCall)
     case toolFinished(toolUseId: String, outcome: ToolOutcome, durationMs: Int?)

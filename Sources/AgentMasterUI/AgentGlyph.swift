@@ -1,22 +1,23 @@
 import SwiftUI
+import AgentMasterCore
 
 /// A hand-drawn outline that tells agents apart at a glance; not the vendors' official artwork.
 public struct AgentGlyph: View {
-    let agentId: String
+    let style: AgentGlyphStyle
     let size: CGFloat
 
-    public init(agentId: String, size: CGFloat = 40) {
-        self.agentId = agentId
+    public init(style: AgentGlyphStyle, size: CGFloat = 40) {
+        self.style = style
         self.size = size
     }
 
     public var body: some View {
-        switch agentId {
-        case "claude":
+        switch style {
+        case .spark(let hex):
             ClaudeSpark()
-                .stroke(Color(hex: "#D97757"), style: StrokeStyle(lineWidth: size * 0.09, lineCap: .round))
+                .stroke(Color(hex: hex), style: StrokeStyle(lineWidth: size * 0.09, lineCap: .round))
                 .frame(width: size, height: size)
-        case "codex":
+        case .terminalPrompt:
             ZStack {
                 RoundedRectangle(cornerRadius: size * 0.26)
                     .stroke(Palette.text, lineWidth: size * 0.06)
@@ -25,8 +26,8 @@ public struct AgentGlyph: View {
                     .padding(size * 0.26)
             }
             .frame(width: size, height: size)
-        default:
-            Image(systemName: "terminal").font(.system(size: size * 0.7)).foregroundStyle(Palette.muted)
+        case .symbol(let name):
+            Image(systemName: name).font(.system(size: size * 0.7)).foregroundStyle(Palette.muted)
                 .frame(width: size, height: size)
         }
     }

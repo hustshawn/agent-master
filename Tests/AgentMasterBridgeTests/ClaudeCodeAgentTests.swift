@@ -3,18 +3,15 @@ import AgentMasterCore
 @testable import AgentMasterBridge
 
 final class ClaudeCodeAgentTests: XCTestCase {
-    private var root: URL!
-
-    override func setUp() {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("am-claude-\(UUID().uuidString.prefix(8))")
-    }
+    private let install = FakeInstall()
 
     override func tearDown() {
-        try? FileManager.default.removeItem(at: root)
+        install.remove()
     }
 
     private func args(_ values: [String: String], resumeId: String? = nil) -> [String] {
-        ClaudeCodeAgent.arguments(settingsPath: "/s.json", preferences: AgentPreferences(values: values), resumeId: resumeId)
+        ClaudeCodeAgent().arguments(preferences: AgentPreferences(values: values), hookArguments: ["--settings", "/s.json"],
+                                    resumeId: resumeId)
     }
 
     private let noBypass = ["allowBypass": "false"]
@@ -75,7 +72,7 @@ final class ClaudeCodeAgentTests: XCTestCase {
         XCTAssertTrue(allowsCustom)
         guard case let .choice(modes, modesCustom) = options[1].kind else { return XCTFail("mode is a choice") }
         XCTAssertEqual(modes.map(\.value), ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"])
-        XCTAssertEqual(modes[0].label, "manual (default)")
+        XCTAssertEqual(modes.map(\.label), ["Manual (default)", "Accept edits", "Plan", "Auto", "Don't ask", "Bypass permissions"])
         XCTAssertFalse(modesCustom)
         XCTAssertEqual(options[2].kind, .toggle(default: true))
     }
@@ -96,47 +93,34 @@ final class ClaudeCodeAgentTests: XCTestCase {
                                         preferences: AgentPreferences(values: ["permissionMode": "bypassPermissions"])))
     }
 
-    func testResumeIdIsTheClaudeSessionId() {
-        let existing = ClaudeCodeAgent(transcriptExists: { _ in true })
-        let missing = ClaudeCodeAgent(transcriptExists: { _ in false })
+    func testResumeIdIsTheSessionIdWhileTheTranscriptExists() throws {
+        let agent = ClaudeCodeAgent()
         var state = SessionState()
         // No id → nil
-        XCTAssertNil(existing.resumeId(from: state))
+        XCTAssertNil(agent.resumeId(from: state))
         // Id with no transcriptPath → nil
-        state.claudeSessionId = "abc"
-        XCTAssertNil(existing.resumeId(from: state))
-        // Id with a transcriptPath the injected check says is missing → nil
-        state.transcriptPath = "/fake/abc.jsonl"
-        XCTAssertNil(missing.resumeId(from: state))
+        state.agentSessionId = "abc"
+        XCTAssertNil(agent.resumeId(from: state))
+        // Id with a transcript that is gone → nil
+        state.transcriptPath = install.root.appendingPathComponent("gone.jsonl").path
+        XCTAssertNil(agent.resumeId(from: state))
         // Id with an existing transcript → the id
-        XCTAssertEqual(existing.resumeId(from: state), "abc")
-        XCTAssertTrue(ClaudeCodeAgent().supportsResume)
+        state.transcriptPath = try install.executable("abc.jsonl")
+        XCTAssertEqual(agent.resumeId(from: state), "abc")
+        XCTAssertTrue(agent.supportsResume)
     }
 
     // MARK: launch
 
-    /// Each variant gets its own bundle so one call's hook helper cannot leak into another's.
-    private func paths(withHook: Bool) throws -> AppPaths {
-        let bundle = root.appendingPathComponent(withHook ? "AM.app" : "NoHook.app")
-        if withHook {
-            let helpers = bundle.appendingPathComponent("Contents/Helpers")
-            try FileManager.default.createDirectory(at: helpers, withIntermediateDirectories: true)
-            let hook = helpers.appendingPathComponent("agentmaster-hook")
-            try Data("#!/bin/sh\n".utf8).write(to: hook)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
-        }
-        return AppPaths(supportDirectory: root.appendingPathComponent("Support"), bundleURL: bundle,
-                        executableURL: bundle.appendingPathComponent("Contents/MacOS/AgentMaster"))
-    }
-
     func testLaunchWritesHookSettingsAndCleansTheEnvironment() throws {
-        let paths = try paths(withHook: true)
-        let agent = ClaudeCodeAgent(locate: { _ in "/fake/claude" })
-        let launch = try agent.launch(AgentLaunchRequest(
+        let paths = try install.paths()
+        let claude = try install.executable("claude")
+        let launch = try ClaudeCodeAgent().launch(AgentLaunchRequest(
             sessionId: "S1", preferences: AgentPreferences(values: ["model": "opus", "allowBypass": "false"]),
-            environment: ["PATH": "/usr/bin", "CMUX_SOCKET_PATH": "/tmp/cmux"], paths: paths, resumeId: "abc"))
-        let settings = root.appendingPathComponent("Support/sessions/S1/settings.json").path
-        XCTAssertEqual(launch.executable, "/fake/claude")
+            environment: ["PATH": "/usr/bin", "CMUX_SOCKET_PATH": "/tmp/cmux", "AGENTMASTER_CLAUDE_PATH": claude],
+            paths: paths, resumeId: "abc"))
+        let settings = install.root.appendingPathComponent("Support/sessions/S1/settings.json").path
+        XCTAssertEqual(launch.executable, claude)
         XCTAssertEqual(launch.args, ["--settings", settings, "--model", "opus", "--resume", "abc"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: settings))
         XCTAssertEqual(launch.environment["AGENTMASTER_SESSION_ID"], "S1")
@@ -144,14 +128,11 @@ final class ClaudeCodeAgentTests: XCTestCase {
         XCTAssertNil(launch.environment["CMUX_SOCKET_PATH"])
     }
 
-    func testLaunchFailsWithoutClaudeOrHook() throws {
-        let request = { (paths: AppPaths) in
-            AgentLaunchRequest(sessionId: "S1", preferences: AgentPreferences(), environment: [:], paths: paths)
-        }
-        XCTAssertThrowsError(try ClaudeCodeAgent(locate: { _ in nil }).launch(request(try paths(withHook: true)))) {
-            XCTAssertEqual($0 as? AgentLaunchError, .claudeNotFound)
-        }
-        XCTAssertThrowsError(try ClaudeCodeAgent(locate: { _ in "/fake/claude" }).launch(request(try paths(withHook: false)))) {
+    func testLaunchNeedsTheHookHelper() throws {
+        let request = AgentLaunchRequest(sessionId: "S1", preferences: AgentPreferences(),
+                                         environment: ["AGENTMASTER_CLAUDE_PATH": try install.executable("claude")],
+                                         paths: try install.paths(withHook: false))
+        XCTAssertThrowsError(try ClaudeCodeAgent().launch(request)) {
             XCTAssertEqual($0 as? AgentLaunchError, .hookHelperMissing)
         }
     }

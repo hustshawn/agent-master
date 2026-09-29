@@ -45,6 +45,8 @@ jobs:
 
   server:
     strategy:
+      # Report each architecture on its own instead of cancelling the other on the first failure.
+      fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}

@@ -16,3 +16,4 @@
 | [0009](0009-codex-agent.md) | 接入 Codex CLI 作为第二个 agent | 已接受 |
 | [0010](0010-agent-adapter.md) | Agent 适配层：每个 agent 只描述自己的差异 | 已接受 |
 | [0011](0011-web-edition.md) | Web 版：agentmaster-server + 浏览器界面 | 已接受 |
+| [0012](0012-kiro-agent.md) | 接入 Kiro CLI 作为第三个 agent | 已接受 |

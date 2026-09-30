@@ -4,7 +4,7 @@ You are an AI coding agent on a Linux machine. The user wants **AgentMaster's we
 here. Follow these steps in order. Each step says how to check it worked. **Stop and ask the user** where a step says
 so. Do not guess past those points.
 
-What you are installing: one server process. It runs coding-agent CLIs (`claude`, `codex`) in pseudo-terminals and serves a
+What you are installing: one server process. It runs coding-agent CLIs (`claude`, `codex`, `kiro-cli`) in pseudo-terminals and serves a
 browser UI for them on one port. It installs into the user's home directory and runs as a systemd *user* service. Nothing
 needs root.
 
@@ -22,11 +22,11 @@ you have to build from source (step 3), only the server products are built. Do n
 
 ## Rules
 
-- Install as the **user who will use it**, the one whose login shell runs `claude`/`codex`. Never as root, and never with `sudo`,
+- Install as the **user who will use it**, the one whose login shell runs `claude`/`codex`/`kiro-cli`. Never as root, and never with `sudo`,
   except for the single optional `loginctl` command in step 5, and only if the user agrees.
 - Keep the server on `127.0.0.1` unless the user explicitly asks for another address. How it is reached from outside (SSH port
   forwarding, a load balancer, TLS) is the user's decision. Do not set it up.
-- Do not edit the user's shell profiles, `~/.claude`, or `~/.codex`. Do not delete `~/.agentmaster-server`. It holds the user's
+- Do not edit the user's shell profiles, `~/.claude`, `~/.codex`, or `~/.kiro`. Do not delete `~/.agentmaster-server`. It holds the user's
   sessions, settings and access token.
 - The access token grants shell access as this user. Show it only in your final report to the user. Never paste it into files,
   commits, issues or other tools.
@@ -53,12 +53,12 @@ Run each check and compare with the expected result:
 |---|---|---|
 | OS and architecture | `uname -sm` | `Linux x86_64` or `Linux aarch64`. Anything else: stop and tell the user there is no prebuilt server for it |
 | Not root | `id -u` | Not `0`. If it is `0`, stop and ask which user should own the install |
-| Agents on the login PATH | `"$SHELL" -lic 'command -v claude; command -v codex' 2>/dev/null` | At least one path. The server finds agents through the login shell, so a binary that is only on your current PATH does not count |
+| Agents on the login PATH | `"$SHELL" -lic 'command -v claude; command -v codex; command -v kiro-cli' 2>/dev/null` | At least one path. The server finds agents through the login shell, so a binary that is only on your current PATH does not count |
 | systemd user session | `systemctl --user show-environment >/dev/null && echo yes` | `yes`. If not, the installer falls back to `nohup` (see step 5) |
 | Port free | `(exec 3<>/dev/tcp/127.0.0.1/8765) 2>/dev/null && echo busy \|\| echo free` | `free`. If `busy`, check whether it is already AgentMaster (step 4). Otherwise **ask the user** which port to use |
 | Existing install | `ls ~/.local/share/agentmaster-server/current 2>/dev/null && systemctl --user is-active agentmaster-server` | Nothing (fresh install), or `active` (already installed: installing again upgrades it and keeps the data) |
 
-If neither `claude` nor `codex` is found, tell the user. The server installs anyway, but sessions cannot start until one is
+If none of `claude`, `codex` and `kiro-cli` is found, tell the user. The server installs anyway, but sessions cannot start until one is
 installed.
 
 ## 3. Install
@@ -127,7 +127,7 @@ End with this, filled in:
 
 ```
 AgentMaster server <version> is running on <host>:<port> as a systemd user service (or: under nohup).
-Agents found: <claude, codex, …>
+Agents found: <claude, codex, kiro-cli, …>
 Open:   http://127.0.0.1:<port>/#token=<token>        (the token is also in ~/.agentmaster-server/token)
 Reach it from your machine, e.g.:  ssh -L <port>:127.0.0.1:<port> <user>@<this host>
 Manage: systemctl --user status|restart|stop agentmaster-server · logs: journalctl --user -u agentmaster-server -f

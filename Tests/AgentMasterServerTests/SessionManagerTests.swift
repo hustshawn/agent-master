@@ -1,6 +1,7 @@
 import XCTest
 import AgentMasterCore
 import AgentMasterWire
+import AgentMasterBridge
 @testable import AgentMasterServerKit
 
 /// The manager with a stand-in for `claude`: a script that prints a line and then echoes its input.
@@ -157,12 +158,14 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertThrowsError(try manager.create(projectPath: root.appendingPathComponent("missing").path)) {
             guard case SessionManagerError.notADirectory = $0 else { return XCTFail("\($0)") }
         }
-        XCTAssertThrowsError(try manager.create(projectPath: project, agentId: "kiro")) {
+        let unknown = "no-such-agent"
+        XCTAssertNil(AgentRegistry.agent(id: unknown))
+        XCTAssertThrowsError(try manager.create(projectPath: project, agentId: unknown)) {
             guard case SessionManagerError.unknownAgent = $0 else { return XCTFail("\($0)") }
         }
         XCTAssertThrowsError(try manager.rename(id: "nope", to: "x"))
         XCTAssertThrowsError(try manager.close(id: "nope"))
-        XCTAssertThrowsError(try manager.setOption(agentId: "kiro", optionId: "model", value: "x"))
+        XCTAssertThrowsError(try manager.setOption(agentId: unknown, optionId: "model", value: "x"))
     }
 
     func testAModelOverrideReachesTheCommandLineOnce() throws {

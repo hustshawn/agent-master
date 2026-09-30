@@ -32,7 +32,8 @@ let package = Package(
         .testTarget(name: "AgentMasterBridgeTests", dependencies: ["AgentMasterBridge"],
                     resources: [.copy("Fixtures")]),
         .testTarget(name: "AgentMasterServerTests",
-                    dependencies: ["AgentMasterServerKit", .product(name: "HummingbirdTesting", package: "hummingbird")]),
+                    dependencies: ["AgentMasterServerKit", "AgentMasterBridge",
+                                   .product(name: "HummingbirdTesting", package: "hummingbird")]),
     ]
 )
 

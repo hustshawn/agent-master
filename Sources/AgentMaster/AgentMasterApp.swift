@@ -25,6 +25,7 @@ extension AgentShortcut {
         var modifiers: EventModifiers = .command
         if option { modifiers.insert(.option) }
         if shift { modifiers.insert(.shift) }
+        if control { modifiers.insert(.control) }
         return modifiers
     }
 }

@@ -3,6 +3,7 @@ import Foundation
 import Hummingbird
 import HummingbirdTesting
 import Logging
+import AgentMasterBridge
 @testable import AgentMasterServerKit
 
 /// The HTTP API end to end, in memory, over a manager whose `claude` is a stand-in script.
@@ -127,7 +128,7 @@ final class WebServerTests: XCTestCase {
             try await client.execute(uri: "/api/agents", method: .get, headers: self.auth) {
                 let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(buffer: $0.body)) as? [String: Any])
                 let agents = try XCTUnwrap(json["agents"] as? [[String: Any]])
-                XCTAssertEqual(agents.map { $0["id"] as? String }, ["claude", "codex"])
+                XCTAssertEqual(agents.map { $0["id"] as? String }, AgentRegistry.all.map(\.id))
                 let claude = agents[0]
                 XCTAssertEqual((claude["preferences"] as? [String: String])?["permissionMode"], "bypassPermissions")
                 XCTAssertEqual(claude["forcedOn"] as? [String], ["allowBypass"], "bypass mode forces the bypass toggle")

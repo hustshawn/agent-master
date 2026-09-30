@@ -139,12 +139,13 @@ final class ClaudeCodeAgentTests: XCTestCase {
 
     // MARK: registry
 
+    /// Holds for whatever agents are registered, so adding one needs no change here.
     func testRegistryHasClaudeAsTheDefault() {
-        XCTAssertEqual(AgentRegistry.all.map(\.id), ["claude", "codex"])
         XCTAssertEqual(AgentRegistry.defaultAgent.id, "claude")
-        XCTAssertEqual(AgentRegistry.agent(id: "claude")?.displayName, "Claude Code")
-        XCTAssertEqual(AgentRegistry.agent(id: "codex")?.displayName, "Codex")
-        XCTAssertNil(AgentRegistry.agent(id: "kiro"))
+        let ids = AgentRegistry.all.map(\.id)
+        XCTAssertEqual(Set(ids).count, ids.count, "ids are unique")
+        for id in ids { XCTAssertEqual(AgentRegistry.agent(id: id)?.id, id) }
+        XCTAssertNil(AgentRegistry.agent(id: "no-such-agent"))
     }
 
     func testNewSessionFollowsTheSelectedSessionsAgent() {

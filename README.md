@@ -12,7 +12,7 @@
 ![Web edition: Linux](https://img.shields.io/badge/web%20edition-Linux%20x86__64%20%7C%20arm64-FCC624?logo=linux&logoColor=black)
 ![Swift 5.10+](https://img.shields.io/badge/Swift-5.10%2B-F05138?logo=swift&logoColor=white)
 ![Apple silicon](https://img.shields.io/badge/arch-Apple%20silicon-555)
-![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex-D97757)
+![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Kiro-D97757)
 [![License: proprietary](https://img.shields.io/badge/license-proprietary-lightgrey)](LICENSE)
 
 One place to run and manage all your coding-agent CLIs, as a native macOS app or in the browser.
@@ -36,18 +36,19 @@ Both have the sidebar, the agent's real TUI, the inspector, the new-session pane
 |---|---|---|---|
 | [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) | ✓ via hooks passed with `--settings` | ✓ `claude --resume` | ✓ via the status line |
 | [OpenAI Codex CLI](https://github.com/openai/codex) | ✓ via hooks passed with `-c`, which needs `--dangerously-bypass-hook-trust` ([why](docs/adr/0009-codex-agent.md)) | ✓ `codex resume` | — |
+| [Kiro CLI](https://kiro.dev/docs/cli/) | ✓ via a per-session agent config that `KIRO_AGENT_CONFIG_DIR` points to ([trade-offs](docs/adr/0012-kiro-agent.md)) | ✓ `kiro-cli chat --resume-id` | — |
 
 More agents can be added without touching the UI. See [Adding an agent](#adding-an-agent).
 
 ## Features
 
 - **Every agent in one sidebar.** Sessions are grouped by project, whichever agent runs them. Each session is titled by its first prompt, and you can rename it. Sessions from agents other than Claude Code are labelled with the agent's name, for example `Codex · idle`.
-- **New session panel.** Every ＋ opens a panel where you choose the agent and, if you want, a model other than its default. ⌘N starts Claude Code in the current project, and ⌥⌘N starts Codex.
+- **New session panel.** Every ＋ opens a panel where you choose the agent and, if you want, a model other than its default. ⌘N starts another session with the selected session's agent in its project, ⌥⌘N starts Codex, and ⌃⌘N starts Kiro.
 - **Restore on launch.** Sessions that were open when you quit come back and resume their conversations.
 - **Review inspector.** A collapsible side panel (⌥⌘0) shows todos, subagents and file changes for the selected session.
 - **Header status.** The model and permission mode, plus context usage and cost where the agent reports them.
 - **Per-agent settings (⌘,).** Each agent has its own page. It shows where the binary was found and holds its defaults for new sessions, such as model, permission mode, sandbox and approval policy.
-- **Non-invasive.** Hooks are injected into each session through the agent's own command-line options. AgentMaster never edits your global Claude Code or Codex configuration. If AgentMaster isn't running, every agent behaves as usual.
+- **Non-invasive.** Hooks are injected into each session through the agent's own command-line options, or for Kiro an agent config in the session's own folder. AgentMaster never edits your global Claude Code, Codex or Kiro configuration. If AgentMaster isn't running, every agent behaves as usual.
 
 ## Requirements
 
@@ -59,6 +60,7 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
   |---|---|---|
   | Claude Code | `AGENTMASTER_CLAUDE_PATH` | `~/.local/bin/claude`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
   | Codex CLI 0.154 or later | `AGENTMASTER_CODEX_PATH` | `~/.local/bin/codex`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
+  | Kiro CLI 2.25 or later | `AGENTMASTER_KIRO_PATH` | `~/.local/bin/kiro-cli`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
 
 ## Download
 
@@ -89,7 +91,7 @@ The web edition is for running agents on a remote server. `agentmaster-server` r
 
 ### Install on a Linux server
 
-On the server (x86_64 or aarch64), log in as the user who runs `claude` or `codex` and run:
+On the server (x86_64 or aarch64), log in as the user who runs `claude`, `codex` or `kiro-cli` and run:
 
 ```bash
 gh release download -R hustshawn/agent-master -p install-server.sh -O - | bash
@@ -134,7 +136,7 @@ build/agentmaster-server-linux-x86_64/agentmaster-server
 swift build
 swift test                   # unit and integration tests
 python3 scripts/smoke.py     # end-to-end check against the real claude (uses a few cents of Haiku tokens)
-uv run --with websockets scripts/web-smoke.py --agent claude   # the same through agentmaster-server's API (or --agent codex, --restart)
+uv run --with websockets scripts/web-smoke.py --agent claude   # the same through agentmaster-server's API (or --agent codex|kiro, --restart)
 uv run --with playwright scripts/web-ui-check.py               # the web UI in headless Chromium against the real claude
 swift scripts/make-icon.swift  # regenerate Assets/AppIcon.icns
 ```

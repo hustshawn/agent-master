@@ -416,6 +416,31 @@ function toggleInspector() {
 
 // MARK: glyphs
 
+// Kiro's ghost, traced from its app icon into a 100×100 box (x, y pairs); AgentGlyph.swift draws the same.
+const GHOST_POINTS = [
+  58,83.5, 56.5,83.5, 55,83, 53.7,82, 52,80.2, 51,79.8, 50,80, 47,81.5, 42.5,83.1, 39,83.4,
+  36.5,83.1, 35,82.5, 32.5,80.5, 31.1,77.5, 30.8,75, 31.6,71, 31.5,70, 30.5,69.4, 27,69.7, 24.5,69.3,
+  22.9,68, 22.3,67, 21.9,65.5, 22,64, 22.5,62.5, 24.7,58, 26,54.5, 27.1,49, 28.6,37.5, 30.3,31.5,
+  32.4,27, 35,23.6, 39.5,19.7, 45,17.1, 51.5,15.8, 57,16.4, 60,17.2, 65.5,19.9, 68.5,22.3, 71.9,26,
+  74.6,31, 76.2,35.5, 77.2,41, 77.7,49, 77.1,55.5, 75.5,63, 73.6,68.5, 70.5,74.5, 68.7,77, 66.7,79,
+  62.5,82.1,
+];
+
+/// A closed Catmull-Rom spline through x, y pairs, as an SVG path of cubic Béziers.
+function smoothClosedPath(flat) {
+  const p = [];
+  for (let i = 0; i < flat.length; i += 2) p.push([flat[i], flat[i + 1]]);
+  const n = p.length, at = (i) => p[(i + n) % n];
+  let d = `M${p[0][0]} ${p[0][1]}`;
+  for (let i = 0; i < n; i++) {
+    const [a, b, c, e] = [at(i - 1), at(i), at(i + 1), at(i + 2)];
+    const c1 = [b[0] + (c[0] - a[0]) / 6, b[1] + (c[1] - a[1]) / 6];
+    const c2 = [c[0] - (e[0] - b[0]) / 6, c[1] - (e[1] - b[1]) / 6];
+    d += ` C${c1[0].toFixed(2)} ${c1[1].toFixed(2)} ${c2[0].toFixed(2)} ${c2[1].toFixed(2)} ${c[0]} ${c[1]}`;
+  }
+  return d + " Z";
+}
+
 function glyphSVG(glyph, size) {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
@@ -435,6 +460,11 @@ function glyphSVG(glyph, size) {
                     x2: 50 + Math.cos(angle) * 46 * length, y2: 50 + Math.sin(angle) * 46 * length,
                     stroke: glyph.value, "stroke-width": 9, "stroke-linecap": "round" });
     });
+  } else if (glyph.kind === "ghost") {
+    add("rect", { x: 0, y: 0, width: 100, height: 100, rx: 14, fill: glyph.value });
+    add("path", { d: smoothClosedPath(GHOST_POINTS), fill: "#fff" });
+    add("ellipse", { cx: 53, cy: 40, rx: 3.2, ry: 5.2, fill: "#0d0b12" });
+    add("ellipse", { cx: 64.5, cy: 40.1, rx: 3.2, ry: 5.2, fill: "#0d0b12" });
   } else {
     add("rect", { x: 5, y: 5, width: 90, height: 90, rx: 24, fill: "none", stroke: "#ccd3db", "stroke-width": 6 });
     add("polyline", { points: "30,36 44,50 30,64", fill: "none", stroke: "#ccd3db", "stroke-width": 8,

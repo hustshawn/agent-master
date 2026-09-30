@@ -165,6 +165,7 @@ public struct AgentJSON: Codable, Sendable {
         switch agent.glyph {
         case .spark(let hex): glyph = Glyph(kind: "spark", value: hex)
         case .terminalPrompt: glyph = Glyph(kind: "terminalPrompt", value: nil)
+        case .ghost(let hex): glyph = Glyph(kind: "ghost", value: hex)
         case .symbol(let name): glyph = Glyph(kind: "symbol", value: name)
         }
         location = agent.executable.locate(environment: environment)

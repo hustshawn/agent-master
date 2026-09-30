@@ -2,7 +2,7 @@
 """End-to-end check of the web edition: agentmaster-server + a real agent, driven only through the HTTP and
 WebSocket API the browser uses.
 
-Usage: uv run --with websockets scripts/web-smoke.py [--agent claude|codex] [--server PATH]
+Usage: uv run --with websockets scripts/web-smoke.py [--agent claude|codex|kiro] [--server PATH]
 Starts the server on a free port with a scratch data directory, sets the agent's defaults through the API,
 starts a session in a scratch project, answers the agent's first-run prompts, sends one task that edits a
 file, and checks that the session state (status, first prompt, file change) and the terminal stream arrive.
@@ -19,6 +19,7 @@ PROMPT = ("Do these steps in order without asking me anything: 1) edit app.py so
 DEFAULTS = {
     "claude": {"model": "haiku", "permissionMode": "bypassPermissions"},
     "codex": {"sandbox": "workspace-write", "approval": "never"},
+    "kiro": {"model": "claude-haiku-4.5", "trustAllTools": "true"},
 }
 
 
@@ -134,6 +135,11 @@ async def run(args):
                         await send("\x1b[B"); await asyncio.sleep(0.5); await send("\r")
                         screen = b""
                         continue
+                    if "trust-all" not in answered and b"Yes,Iaccept" in flat:
+                        answered.add("trust-all")   # kiro: accept --trust-all-tools for this run
+                        await asyncio.sleep(2); await send("\x1b[B"); await asyncio.sleep(0.5); await send("\r")
+                        screen = b""
+                        continue
                     # Claude's folder trust dialog, then Codex's (worded differently across Codex versions).
                     if "trust" not in answered and (b"Entertoconfirm" in flat or b"Doyoutrustthecontents" in flat
                                                     or b"Trustthisfolder?" in flat):
@@ -179,7 +185,7 @@ async def run(args):
             else:
                 if restored[0]["title"] != conversation["title"]:
                     failures.append(f"the restored title is {restored[0]['title']!r}, not {conversation['title']!r}")
-                flag = "--resume" if args.agent == "claude" else "resume"
+                flag = {"claude": "--resume", "codex": "resume", "kiro": "--resume-id"}[args.agent]
                 agents = subprocess.run(["ps", "-ax", "-o", "ppid=,args="], capture_output=True, text=True).stdout
                 resumed = [line for line in agents.splitlines()
                            if line.split(None, 1)[0] == str(server.pid) and f" {flag} " in line]

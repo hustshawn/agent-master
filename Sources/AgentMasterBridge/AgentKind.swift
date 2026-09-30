@@ -29,6 +29,9 @@ public protocol AgentKind: Sendable {
     func hooksEnabled(preferences: AgentPreferences) -> Bool
     /// Writes `plan` in this agent's own hook format; returns the arguments that make the agent load it.
     func hookArguments(for plan: HookPlan) throws -> [String]
+    /// Environment variables that make the agent load what `hookArguments` wrote, for an agent that
+    /// cannot be pointed at it from the command line.
+    func hookEnvironment(for plan: HookPlan) -> [String: String]
     /// The full argument list, given the hook arguments (empty when hooks are off) and an optional resume id.
     func arguments(preferences: AgentPreferences, hookArguments: [String], resumeId: String?) -> [String]
 
@@ -43,6 +46,7 @@ extension AgentKind {
     public func isForcedOn(optionId: String, preferences: AgentPreferences) -> Bool { false }
     public func hooksEnabled(preferences: AgentPreferences) -> Bool { false }
     public func hookArguments(for plan: HookPlan) throws -> [String] { [] }
+    public func hookEnvironment(for plan: HookPlan) -> [String: String] { [:] }
 
     /// Resume the conversation the hooks reported, as long as its transcript is still on disk.
     public func resumeId(from state: SessionState) -> String? {
@@ -55,22 +59,26 @@ extension AgentKind {
             throw AgentLaunchError.notFound(agent: displayName, executable: executable)
         }
         var hookArgs: [String] = []
+        var hookEnv: [String: String] = [:]
         if hooksEnabled(preferences: request.preferences) {
             guard let hook = request.paths.hookExecutable() else { throw AgentLaunchError.hookHelperMissing }
-            hookArgs = try hookArguments(for: HookPlan(hookExecutable: hook, sessionId: request.sessionId,
-                                                       paths: request.paths, projectPath: request.projectPath))
+            let plan = HookPlan(hookExecutable: hook, sessionId: request.sessionId,
+                                paths: request.paths, projectPath: request.projectPath)
+            hookArgs = try hookArguments(for: plan)
+            hookEnv = hookEnvironment(for: plan)
         }
         return AgentLaunch(
             executable: binary,
             args: arguments(preferences: request.preferences, hookArguments: hookArgs, resumeId: request.resumeId),
             environment: LaunchEnvironment.sessionEnvironment(base: request.environment, sessionId: request.sessionId,
-                                                             socketPath: request.paths.socketPath))
+                                                             socketPath: request.paths.socketPath)
+                .merging(hookEnv) { _, hook in hook })
     }
 }
 
 /// Every agent AgentMaster offers, in UI order; the first is the default. Adding an agent means adding it here.
 public enum AgentRegistry {
-    public static let all: [any AgentKind] = [ClaudeCodeAgent(), CodexAgent()]
+    public static let all: [any AgentKind] = [ClaudeCodeAgent(), CodexAgent(), KiroAgent()]
     public static var defaultAgent: any AgentKind { all[0] }
 
     public static func agent(id: String) -> (any AgentKind)? {
@@ -130,6 +138,15 @@ public struct HookPlan {
     public func writeSessionFile(_ data: Data) throws -> URL {
         try paths.writeSettings(data, sessionId: sessionId)
     }
+
+    /// Writes `data` to `name` in a subfolder of this session's directory, for an agent that reads a folder.
+    public func writeSessionFile(_ data: Data, folder: String, name: String) throws -> URL {
+        let directory = paths.sessionDirectory(sessionId).appendingPathComponent(folder)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent(name)
+        try data.write(to: url, options: .atomic)
+        return url
+    }
 }
 
 /// A key equivalent, kept free of SwiftUI so agents can declare one.
@@ -137,11 +154,13 @@ public struct AgentShortcut: Equatable, Sendable {
     public let key: Character
     public let option: Bool
     public let shift: Bool
+    public let control: Bool
 
-    public init(key: Character, option: Bool = false, shift: Bool = false) {
+    public init(key: Character, option: Bool = false, shift: Bool = false, control: Bool = false) {
         self.key = key
         self.option = option
         self.shift = shift
+        self.control = control
     }
 }
 

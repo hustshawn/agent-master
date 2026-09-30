@@ -31,6 +31,8 @@ public enum AgentGlyphStyle: Equatable, Sendable {
     case spark(hex: String)
     /// A `>_` prompt in a rounded square.
     case terminalPrompt
+    /// A white ghost on a rounded square of the given colour, like Kiro's.
+    case ghost(hex: String)
     /// An SF Symbol name.
     case symbol(String)
 }

@@ -13,7 +13,7 @@
 #
 # Downloads use `gh` when it is installed and logged in, else GITHUB_TOKEN with the GitHub API (the repo is
 # private). Nothing here needs root. Sessions, settings and the token live in ~/.agentmaster-server and survive
-# upgrades. Run it as the user whose login shell finds `claude` and `codex`.
+# upgrades. Run it as the user whose login shell finds `claude`, `codex` and `kiro-cli`.
 set -euo pipefail
 
 REPO="${AGENTMASTER_REPO:-hustshawn/agent-master}"
@@ -121,7 +121,7 @@ ln -sfn "$TARGET" "$PREFIX/current"
 find "$PREFIX" -mindepth 1 -maxdepth 1 -type d ! -name "$VERSION" -exec rm -rf {} +   # keep only this version
 
 # The agents come from the login shell the server captures at startup; warn early if they are not there.
-for agent in claude codex; do
+for agent in claude codex kiro-cli; do
     if ! "${SHELL:-/bin/bash}" -lic "command -v $agent" >/dev/null 2>&1; then
         echo "note: '$agent' is not on your login shell's PATH; its sessions will not start." >&2
     fi

@@ -88,6 +88,7 @@ public struct SettingsScreen<General: View>: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()   // the selection is shown already; the ring landed on the first row on open
     }
 
     @ViewBuilder

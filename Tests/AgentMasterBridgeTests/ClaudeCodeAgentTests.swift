@@ -140,11 +140,12 @@ final class ClaudeCodeAgentTests: XCTestCase {
     // MARK: registry
 
     func testRegistryHasClaudeAsTheDefault() {
-        XCTAssertEqual(AgentRegistry.all.map(\.id), ["claude", "codex"])
+        XCTAssertEqual(AgentRegistry.all.map(\.id), ["claude", "codex", "kiro"])
         XCTAssertEqual(AgentRegistry.defaultAgent.id, "claude")
         XCTAssertEqual(AgentRegistry.agent(id: "claude")?.displayName, "Claude Code")
         XCTAssertEqual(AgentRegistry.agent(id: "codex")?.displayName, "Codex")
-        XCTAssertNil(AgentRegistry.agent(id: "kiro"))
+        XCTAssertEqual(AgentRegistry.agent(id: "kiro")?.displayName, "Kiro")
+        XCTAssertNil(AgentRegistry.agent(id: "gemini"))
     }
 
     func testNewSessionFollowsTheSelectedSessionsAgent() {

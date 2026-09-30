@@ -6,14 +6,11 @@
 
 # AgentMaster
 
-[![Release](https://github.com/hustshawn/agent-master/actions/workflows/release.yml/badge.svg)](https://github.com/hustshawn/agent-master/actions/workflows/release.yml)
-[![Download](https://img.shields.io/badge/download-latest-blue)](https://github.com/hustshawn/agent-master/releases/latest)
-![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)
-![Web edition: Linux](https://img.shields.io/badge/web%20edition-Linux%20x86__64%20%7C%20arm64-FCC624?logo=linux&logoColor=black)
-![Swift 5.10+](https://img.shields.io/badge/Swift-5.10%2B-F05138?logo=swift&logoColor=white)
-![Apple silicon](https://img.shields.io/badge/arch-Apple%20silicon-555)
-![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Kiro-D97757)
-[![License: proprietary](https://img.shields.io/badge/license-proprietary-lightgrey)](LICENSE)
+[![CI](https://github.com/hustshawn/agent-master/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hustshawn/agent-master/actions/workflows/ci.yml)
+[![Download](https://img.shields.io/badge/download-latest-2f81f7)](https://github.com/hustshawn/agent-master/releases/latest)
+![Platforms](https://img.shields.io/badge/platforms-macOS%2014%2B%20%C2%B7%20Linux%20%28web%29-7c8591)
+![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Kiro-7c8591)
+[![License](https://img.shields.io/badge/license-proprietary-7c8591)](LICENSE)
 
 One place to run and manage all your coding-agent CLIs, as a native macOS app or in the browser.
 

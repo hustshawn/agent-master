@@ -113,7 +113,7 @@ final class AppModel {
     /// Every ＋: the floating new-session panel, for `project` or (nil) any recent project.
     func showNewSession(project: String?) {
         newSessionPanel.show(NewSessionForm(
-            agents: newSessionAgents(), fixedProject: project, projects: recentProjects,
+            agents: newSessionAgents(), initialProject: project, projects: recentProjects,
             chooseFolder: { [weak self] in self?.chooseFolder() },
             onStart: { [weak self] request in
                 self?.newSessionPanel.close()

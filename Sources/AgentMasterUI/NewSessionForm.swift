@@ -29,11 +29,10 @@ public struct NewSessionRequest: Equatable {
     public let model: String?
 }
 
-/// The floating panel behind every ＋: pick the agent and, optionally, a model other than its default.
-/// With `projects` set it also picks the project (the sidebar's bottom ＋ has none of its own).
+/// The floating panel behind every ＋: pick the agent, optionally a model other than its default, and the project.
+/// A project row's ＋ preselects its project; the sidebar's bottom ＋ starts on the most recent one.
 public struct NewSessionForm: View {
     let agents: [NewSessionAgent]
-    let fixedProject: String?
     let projects: [String]
     let chooseFolder: () -> String?
     let onStart: (NewSessionRequest) -> Void
@@ -44,17 +43,16 @@ public struct NewSessionForm: View {
     @State private var customModel = ""
     @State private var project: String?
 
-    public init(agents: [NewSessionAgent], fixedProject: String?, projects: [String] = [],
+    public init(agents: [NewSessionAgent], initialProject: String?, projects: [String] = [],
                 chooseFolder: @escaping () -> String? = { nil },
                 onStart: @escaping (NewSessionRequest) -> Void, onCancel: @escaping () -> Void) {
         self.agents = agents
-        self.fixedProject = fixedProject
         self.projects = projects
         self.chooseFolder = chooseFolder
         self.onStart = onStart
         self.onCancel = onCancel
         _agentId = State(initialValue: agents.first?.id ?? "")
-        _project = State(initialValue: fixedProject ?? projects.first)
+        _project = State(initialValue: initialProject ?? projects.first)
     }
 
     private var agent: NewSessionAgent? {
@@ -63,13 +61,7 @@ public struct NewSessionForm: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("New Session").font(.system(size: 22, weight: .semibold)).foregroundStyle(Palette.text)
-                if let fixedProject {
-                    Text(fixedProject).font(.system(size: 13)).foregroundStyle(Palette.muted)
-                        .lineLimit(1).truncationMode(.head)
-                }
-            }
+            Text("New Session").font(.system(size: 22, weight: .semibold)).foregroundStyle(Palette.text)
 
             field("Agent") {
                 HStack(spacing: 12) {
@@ -79,7 +71,7 @@ public struct NewSessionForm: View {
 
             if let agent { field("Model") { modelRows(agent) } }
 
-            if fixedProject == nil { field("Project") { projectRow } }
+            field("Project") { projectRow }
 
             HStack(spacing: 10) {
                 Spacer()

@@ -14,6 +14,10 @@
 
 One place to run and manage all your coding-agent CLIs, as a native macOS app or in the browser.
 
+<p align="center">
+  <img src="docs/images/main-window.png" alt="AgentMaster with Kiro, Codex and Claude Code sessions in the sidebar, a Claude Code session in the middle and its file changes in the inspector">
+</p>
+
 AgentMaster runs each agent's real TUI in an embedded terminal and manages them from one window. You get a session sidebar across projects and agents, live panels for the current session, and per-agent defaults. It does not reimplement any agent. Every CLI keeps its own harness and works exactly as it does in your terminal, with its own config, instructions, skills, MCP servers, hooks and plugins. AgentMaster only adds a thin, per-session layer on top.
 
 ## Two editions
@@ -40,7 +44,10 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
 ## Features
 
 - **Every agent in one sidebar.** Sessions are grouped by project, whichever agent runs them. Each session is titled by its first prompt, and you can rename it. Sessions from agents other than Claude Code are labelled with the agent's name, for example `Codex · idle`.
-- **New session panel.** Every ＋ opens a panel where you choose the agent and, if you want, a model other than its default. ⌘N starts another session with the selected session's agent in its project, ⌥⌘N starts Codex, and ⌃⌘N starts Kiro.
+- **New session panel.** Every ＋ opens a panel where you choose the agent, the project and, if you want, a model other than its default. ⌘N starts another session with the selected session's agent in its project, ⌥⌘N starts Codex, and ⌃⌘N starts Kiro.
+
+  <img src="docs/images/new-session.png" width="420" alt="The new-session panel with Claude Code, Codex and Kiro to pick from, a model picker and a project picker">
+
 - **Restore on launch.** Sessions that were open when you quit come back and resume their conversations.
 - **Review inspector.** A collapsible side panel (⌥⌘0) shows todos, subagents and file changes for the selected session.
 - **Header status.** The model and permission mode, plus context usage and cost where the agent reports them.

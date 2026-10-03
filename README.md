@@ -94,6 +94,8 @@ To try the full release build before tagging, run it by hand (Actions → Releas
 
 The web edition is for running agents on a remote server. `agentmaster-server` runs the same agents on that machine (Linux or macOS) and serves the AgentMaster UI to a browser. It has the sidebar, the real agent TUI in the page (xterm.js), the inspector, the new-session panel and Settings. Sessions live on the server, so closing the browser does not stop an agent. Reconnecting shows the terminal again.
 
+Codex and Kiro take over the mouse in their TUI, so a plain drag does not select text in their sessions. Hold Option while dragging on a Mac, or Shift elsewhere. In the Mac app, hold Shift.
+
 ### Install on a Linux server
 
 On the server (x86_64 or aarch64), log in as the user who runs `claude`, `codex` or `kiro-cli` and run:

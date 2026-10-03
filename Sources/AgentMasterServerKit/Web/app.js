@@ -274,7 +274,7 @@ function showTerminal(session) {
     $("terminals").append(node);
     const term = new Terminal({ fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', fontSize: 13,
                                 theme: THEME, cursorBlink: true, allowProposedApi: true, scrollback: 10000,
-                                macOptionIsMeta: true });
+                                macOptionIsMeta: true, macOptionClickForcesSelection: true });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon.WebLinksAddon());

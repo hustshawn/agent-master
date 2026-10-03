@@ -17,6 +17,14 @@ public final class AgentTerminalView: LocalProcessTerminalView {
         return true
     }
 
+    /// SwiftTerm drops the selection on every chunk of output while mouse reporting is allowed, so a running
+    /// agent's spinner clears it before ⌘C. Mouse reporting is held off while something is selected; the click
+    /// or key press that ends the selection turns it back on.
+    public override func selectionChanged(source: Terminal) {
+        super.selectionChanged(source: source)
+        allowMouseReporting = !selection.active
+    }
+
     /// Ctrl+V when the clipboard has an image and no text: Claude Code and Codex read the image from
     /// the clipboard on Ctrl+V, and Codex ignores the empty paste a text-only paste would send.
     /// `nil` means paste the text as usual.

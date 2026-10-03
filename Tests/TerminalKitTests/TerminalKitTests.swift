@@ -10,6 +10,17 @@ final class TerminalKitTests: XCTestCase {
         XCTAssertEqual(launch.environmentStrings, ["A=x=y", "B=2"])
     }
 
+    func testSelectionSurvivesOutputAndEndsWithAClick() {
+        let view = AgentTerminalView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+        view.feed(text: "hello world\r\n")
+        view.selectAll(nil)
+        view.feed(text: "⠋ Working…\r")
+        XCTAssertTrue(view.selection.active)
+        XCTAssertFalse(view.allowMouseReporting)
+        view.selection.active = false
+        XCTAssertTrue(view.allowMouseReporting)
+    }
+
     func testPaletteHasSixteenColorsAndMuseBackground() {
         XCTAssertEqual(TerminalPalette.ansiColors.count, 16)
         let bg = NSColor(hex: Theme.bg).usingColorSpace(.sRGB)!

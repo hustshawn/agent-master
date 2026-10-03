@@ -24,6 +24,8 @@ public protocol AgentKind: Sendable {
     func isForcedOn(optionId: String, preferences: AgentPreferences) -> Bool
     /// The id `launch` needs to continue this session's conversation later.
     func resumeId(from state: SessionState) -> String?
+    /// The conversation in the transcript the hooks reported, for a summary; empty if unreadable.
+    func transcript(at path: String) -> [TranscriptEntry]
 
     /// Whether to inject AgentMaster's hooks into this launch.
     func hooksEnabled(preferences: AgentPreferences) -> Bool
@@ -47,6 +49,7 @@ extension AgentKind {
     public func hooksEnabled(preferences: AgentPreferences) -> Bool { false }
     public func hookArguments(for plan: HookPlan) throws -> [String] { [] }
     public func hookEnvironment(for plan: HookPlan) -> [String: String] { [:] }
+    public func transcript(at path: String) -> [TranscriptEntry] { [] }
 
     /// Resume the conversation the hooks reported, as long as its transcript is still on disk.
     public func resumeId(from state: SessionState) -> String? {

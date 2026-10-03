@@ -50,6 +50,7 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
 
 - **Restore on launch.** Sessions that were open when you quit come back and resume their conversations.
 - **Review inspector.** A collapsible side panel (⌥⌘0) shows todos, subagents and file changes for the selected session.
+- **Summarize a session.** Click Summarize at the top of the inspector, or right-click a session and choose Summarize Session (⌥⌘S). AgentMaster reads the session's transcript and runs `claude -p` in the background, with no tools and no saved session. The inspector then shows what was done, the changed files, open items and a short retrospective. The session itself is not interrupted. The summary is kept until you quit. This needs Claude Code installed, whichever agent ran the session.
 - **Header status.** The model and permission mode, plus context usage and cost where the agent reports them.
 - **Per-agent settings (⌘,).** Each agent has its own page. It shows where the binary was found and holds its defaults for new sessions, such as model, permission mode, sandbox and approval policy.
 - **Non-invasive.** Hooks are injected into each session through the agent's own command-line options, or for Kiro an agent config in the session's own folder. AgentMaster never edits your global Claude Code, Codex or Kiro configuration. If AgentMaster isn't running, every agent behaves as usual.

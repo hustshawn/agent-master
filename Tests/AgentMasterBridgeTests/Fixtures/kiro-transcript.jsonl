@@ -1,0 +1,4 @@
+{"version":"v1","kind":"Prompt","data":{"message_id":"m1","content":[{"kind":"image","data":{"format":"png","source":{"kind":"bytes","data":[1,2]}}},{"kind":"text","data":"Sort the rows"}]}}
+{"version":"v1","kind":"AssistantMessage","data":{"message_id":"m2","content":[{"kind":"thinking","data":{"text":"hm"}},{"kind":"text","data":"Let me look."},{"kind":"toolUse","data":{"toolUseId":"u1","name":"read","input":{"path":"main.go"}}}]}}
+{"version":"v1","kind":"ToolResults","data":{"message_id":"m3","content":[{"kind":"toolResult","data":{"toolUseId":"u1","status":"success","content":[{"kind":"text","data":"package main"}]}}],"results":{}}}
+{"version":"v1","kind":"AssistantMessage","data":{"message_id":"m4","content":[{"kind":"text","data":""},{"kind":"text","data":"Sorted."}]}}

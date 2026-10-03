@@ -36,6 +36,11 @@ public struct KiroAgent: AgentKind {
         ]
     }
 
+    public func transcript(at path: String) -> [TranscriptEntry] {
+        let conversation = (path as NSString).deletingPathExtension + ".jsonl"
+        return FileManager.default.contents(atPath: conversation).map(TranscriptParser.kiro) ?? []
+    }
+
     public func hooksEnabled(preferences: AgentPreferences) -> Bool {
         preferences.bool(Self.hooksOption, default: true)
     }

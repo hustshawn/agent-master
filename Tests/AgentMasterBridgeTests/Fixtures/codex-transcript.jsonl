@@ -1,0 +1,11 @@
+{"type":"session_meta","payload":{"id":"x","cwd":"/tmp/web"}}
+{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n\nbe nice"},{"type":"input_text","text":"<environment_context>\n</environment_context>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fix formatPrice"}]}}
+{"type":"response_item","payload":{"type":"reasoning","summary":[]}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"cat src/format.ts\"}","call_id":"c1"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"export function formatPrice"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch","call_id":"c2"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c2","output":"Success"}}
+{"type":"event_msg","payload":{"type":"token_count"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Fixed it."}]}}

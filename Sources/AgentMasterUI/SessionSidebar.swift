@@ -113,18 +113,21 @@ public struct SessionSidebar: View {
     let onNewSession: (String?) -> Void
     let onClose: (String) -> Void
     let onRename: (String, String) -> Void
+    let onSummarize: (String) -> Void
     /// Project paths whose rows are hidden; kept for this run only.
     @State private var collapsed: Set<String> = []
     @State private var rename = RenameState()
 
     public init(rows: [SessionRowModel], selection: Binding<String?>,
                 onNewSession: @escaping (String?) -> Void,
-                onClose: @escaping (String) -> Void, onRename: @escaping (String, String) -> Void) {
+                onClose: @escaping (String) -> Void, onRename: @escaping (String, String) -> Void,
+                onSummarize: @escaping (String) -> Void = { _ in }) {
         self.rows = rows
         self._selection = selection
         self.onNewSession = onNewSession
         self.onClose = onClose
         self.onRename = onRename
+        self.onSummarize = onSummarize
     }
 
     public var body: some View {
@@ -197,6 +200,7 @@ public struct SessionSidebar: View {
             .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(row) }, including: editing ? .subviews : .all)
             .contextMenu {
                 Button("Rename…") { beginRename(row) }
+                Button("Summarize Session") { onSummarize(row.id) }
                 Button("Close Session") { onClose(row.id) }
             }
     }

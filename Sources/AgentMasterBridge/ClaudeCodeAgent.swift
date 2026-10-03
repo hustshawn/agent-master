@@ -42,6 +42,10 @@ public struct ClaudeCodeAgent: AgentKind {
         optionId == Self.allowBypassOption && preferences.string(Self.permissionModeOption) == "bypassPermissions"
     }
 
+    public func transcript(at path: String) -> [TranscriptEntry] {
+        FileManager.default.contents(atPath: path).map(TranscriptParser.claude) ?? []
+    }
+
     public func hooksEnabled(preferences: AgentPreferences) -> Bool { true }
 
     public func hookArguments(for plan: HookPlan) throws -> [String] {

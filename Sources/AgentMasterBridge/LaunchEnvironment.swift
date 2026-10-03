@@ -12,15 +12,18 @@ public enum LaunchEnvironment {
     static let strippedPrefixes = ["CMUX_", "AGENTMASTER_"]
 
     public static func sessionEnvironment(base: [String: String], sessionId: String, socketPath: String) -> [String: String] {
-        var env = base.filter { key, _ in
-            !strippedKeys.contains(key) && !strippedPrefixes.contains { key.hasPrefix($0) }
-        }
+        var env = childEnvironment(base: base)
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         if env["LANG"] == nil { env["LANG"] = "en_US.UTF-8" }
         env["AGENTMASTER_SESSION_ID"] = sessionId
         env["AGENTMASTER_SOCKET"] = socketPath
         return env
+    }
+
+    /// `base` without the markers above, for a child that is not an AgentMaster session (e.g. a summary run).
+    public static func childEnvironment(base: [String: String]) -> [String: String] {
+        base.filter { key, _ in !strippedKeys.contains(key) && !strippedPrefixes.contains { key.hasPrefix($0) } }
     }
 
     /// Parses `env -0` output, ignoring anything the shell printed before `marker`.
@@ -137,6 +140,6 @@ public enum LaunchEnvironment {
 }
 
 /// Written by the reader thread before `done.signal()`, read after `done.wait()`.
-private final class DataBox {
+final class DataBox {
     var data = Data()
 }

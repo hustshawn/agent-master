@@ -42,6 +42,10 @@ public struct CodexAgent: AgentKind {
         "on-request": "On request", "never": "Never ask",
     ]
 
+    public func transcript(at path: String) -> [TranscriptEntry] {
+        FileManager.default.contents(atPath: path).map(TranscriptParser.codex) ?? []
+    }
+
     public func hooksEnabled(preferences: AgentPreferences) -> Bool {
         preferences.bool(Self.hooksOption, default: true)
     }

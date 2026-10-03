@@ -164,6 +164,29 @@ final class AppModel {
         persistOpenSessions()
     }
 
+    /// Summarizes and reviews a session from its transcript in the background; the result shows in the inspector.
+    func summarize(_ id: String) {
+        guard let session = sessions.first(where: { $0.id == id }), session.summary != .running else { return }
+        selectedId = id
+        UserDefaults.standard.set(false, forKey: InspectorSettings.collapsedKey)
+        guard let agent = AgentRegistry.agent(id: session.agentId), let path = session.state.transcriptPath else {
+            session.summary = .failed("There is no transcript yet. Send the agent a prompt first.")
+            return
+        }
+        session.summary = .running
+        let directory = paths.supportDirectory
+        Task {
+            let environment = await environment()
+            do {
+                let entries = await Task.detached { agent.transcript(at: path) }.value
+                session.summary = .done(try await SessionSummary.run(entries: entries, environment: environment,
+                                                                     directory: directory))
+            } catch {
+                session.summary = .failed(error.localizedDescription)
+            }
+        }
+    }
+
     /// ⌘W. Returns false when there is no session, so the window closes as usual.
     func closeSelected() -> Bool {
         guard let selectedId else { return false }

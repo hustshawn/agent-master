@@ -25,15 +25,34 @@ public struct PanelSummary: Equatable {
 
 public struct SidePanel: View {
     let state: SessionState
+    let report: SummaryState
+    let onSummarize: () -> Void
 
-    public init(state: SessionState) {
+    public init(state: SessionState, report: SummaryState = .none, onSummarize: @escaping () -> Void = {}) {
         self.state = state
+        self.report = report
+        self.onSummarize = onSummarize
     }
 
     public var body: some View {
         let summary = PanelSummary(state: state)
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                if report == .none {
+                    // Like an empty section's quiet line, with the action in place of the dash.
+                    HStack(spacing: 4) {
+                        Text("SUMMARY").font(MuseFont.heading).foregroundStyle(Palette.muted)
+                        Spacer()
+                        Button("Summarize", action: onSummarize)
+                            .buttonStyle(.plain).font(MuseFont.small).foregroundStyle(Palette.accent)
+                            .help("Summarize and review this session (⌥⌘S)")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                } else {
+                    PanelSection("Summary") { SummaryPanel(summary: report, onRegenerate: onSummarize) }
+                }
+                HairLine()
                 PanelSection("Todo", isEmpty: summary.todoEmpty) { TodoPanel(todos: state.todos) }
                 HairLine()
                 PanelSection("Agents", isEmpty: summary.agentsEmpty) {

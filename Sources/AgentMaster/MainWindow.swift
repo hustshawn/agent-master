@@ -11,7 +11,8 @@ struct MainWindow: View {
             SessionSidebar(rows: model.sessions.map(\.row), selection: $model.selectedId,
                            onNewSession: { model.showNewSession(project: $0) },
                            onClose: { model.close($0) },
-                           onRename: { model.rename($0, to: $1) })
+                           onRename: { model.rename($0, to: $1) },
+                           onSummarize: { model.summarize($0) })
             .frame(minWidth: 180, idealWidth: 240, maxWidth: 360)
 
             if let session = model.selected {
@@ -30,7 +31,8 @@ struct MainWindow: View {
                     InspectorRail(summary: PanelSummary(state: session.state)) { inspectorCollapsed = false }
                         .frame(width: 28)
                 } else {
-                    SidePanel(state: session.state)
+                    SidePanel(state: session.state, report: session.summary,
+                              onSummarize: { model.summarize(session.id) })
                         .frame(minWidth: 240, idealWidth: 320, maxWidth: 480)
                 }
             } else {

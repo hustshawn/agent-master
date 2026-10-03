@@ -19,6 +19,8 @@ final class SessionController: Identifiable {
     private(set) var state = SessionState()
     /// Set by the user (Rename…) or carried over from the journal when restored.
     var customName: String?
+    /// Filled in on request (Summarize Session); not kept across launches.
+    var summary = SummaryState.none
     @ObservationIgnored let terminal: TerminalSession
     @ObservationIgnored private var translator: HookTranslator
 

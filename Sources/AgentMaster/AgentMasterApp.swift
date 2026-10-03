@@ -62,6 +62,9 @@ struct AgentMasterApp: App {
             CommandGroup(after: .sidebar) {
                 Button(inspectorCollapsed ? "Show Inspector" : "Hide Inspector") { inspectorCollapsed.toggle() }
                     .keyboardShortcut("0", modifiers: [.command, .option])
+                Button("Summarize Session") { delegate.model.selectedId.map(delegate.model.summarize) }
+                    .keyboardShortcut("s", modifiers: [.command, .option])
+                    .disabled(delegate.model.selectedId == nil)
             }
             CommandGroup(replacing: .saveItem) {
                 // In the main window ⌘W closes the selected session; elsewhere (Settings) it closes the window.

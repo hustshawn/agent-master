@@ -5,11 +5,16 @@ import AgentMasterBridge
 
 /// Pushed to every browser over /api/events.
 public struct ServerEvent: Codable, Sendable {
-    /// "snapshot" (all sessions), "session" (one added or changed) or "removed".
+    /// "snapshot" (all sessions, requests and messages), "session" (one added or changed), "removed",
+    /// "request" (one opened or resolved) or "message" (a receipt changed).
     public let type: String
     public var sessions: [SessionJSON]?
     public var session: SessionJSON?
     public var id: String?
+    public var requests: [ActionRequestJSON]?
+    public var request: ActionRequestJSON?
+    public var messages: [MessageReceiptJSON]?
+    public var message: MessageReceiptJSON?
 }
 
 public enum SessionManagerError: Error, CustomStringConvertible {
@@ -39,11 +44,15 @@ public final class SessionManager: @unchecked Sendable {
         public var executableURL: URL
         /// The agents' environment. Nil captures the login shell's, falling back to the server's own.
         public var environment: [String: String]?
+        /// How push notifications reach the push services; replaced in tests.
+        public var pushTransport: any WebPushTransport
 
-        public init(dataDirectory: URL, executableURL: URL, environment: [String: String]? = nil) {
+        public init(dataDirectory: URL, executableURL: URL, environment: [String: String]? = nil,
+                    pushTransport: any WebPushTransport = HTTPClientWebPushTransport()) {
             self.dataDirectory = dataDirectory
             self.executableURL = executableURL
             self.environment = environment
+            self.pushTransport = pushTransport
         }
     }
 
@@ -53,6 +62,9 @@ public final class SessionManager: @unchecked Sendable {
     private let journal: OpenSessionJournal
     private let journalLock = NSLock()
     private var hookServer: HookServer?
+    private let requests = ActionRequestStore()
+    private let messages = MessageStore()
+    public let push: PushNotifier
 
     private let lock = NSLock()
     private var sessions: [ServerSession] = []
@@ -68,14 +80,23 @@ public final class SessionManager: @unchecked Sendable {
         environment = configuration.environment ?? LaunchEnvironment.captureLoginShell() ?? ProcessInfo.processInfo.environment
         try paths.prepare()
         settings = ServerSettings(url: configuration.dataDirectory.appendingPathComponent("settings.json"))
+        push = try PushNotifier(dataDirectory: configuration.dataDirectory, transport: configuration.pushTransport)
         paths.removeAllSessionDirectories()
         let server = HookServer(socketPath: paths.socketPath) { [weak self] message, reply in
-            // Approvals and questions are answered in the terminal, as in the Mac app today.
-            if message.kind == .request { reply(nil) }
             self?.route(message)
+            guard message.kind == .request else { return }
+            if let self { self.open(message, reply: reply) } else { reply(nil) }
         }
         try server.start()
         hookServer = server
+        requests.onChange = { [weak self] request in
+            // A timed-out approval's deny interrupts the turn, which ends it without a Stop hook.
+            if request.outcome == "timed out", request.kind == "permission" {
+                self?.session(id: request.sessionId)?.apply([.turnFinished(lastMessage: nil)])
+            }
+            self?.broadcast(ServerEvent(type: "request", request: request))
+        }
+        messages.onChange = { [weak self] receipt in self?.broadcast(ServerEvent(type: "message", message: receipt)) }
     }
 
     // MARK: sessions
@@ -136,7 +157,15 @@ public final class SessionManager: @unchecked Sendable {
         }
         sessions.append(session)
         lock.unlock()
-        process.onExit { [weak session] _ in session?.processExited() }
+        process.onExit { [weak self, weak session] _ in
+            session?.processExited()
+            guard let self else { return }
+            self.requests.expire(sessionId: id, reason: "session ended")
+            // A closed session is gone from the list by now; only an agent that quit by itself is news.
+            if let session = self.session(id: id) {
+                self.push.notify(PushPayload(title: "Agent exited", body: session.json.title, sessionId: id, tag: "exit-\(id)"))
+            }
+        }
         settings.recordProject(projectPath)
         persist()
         let json = session.json
@@ -172,10 +201,49 @@ public final class SessionManager: @unchecked Sendable {
         let session = sessions.remove(at: index)
         lock.unlock()
         session.onChange = nil
+        requests.expire(sessionId: id, reason: "session closed")
+        messages.removeAll(sessionId: id)
         session.process.terminate()
         paths.removeSessionDirectory(sessionId: id)
         persist()
         broadcast(ServerEvent(type: "removed", id: id))
+    }
+
+    /// The session's conversation from its transcript, from item `after` on (see `Chat.page`).
+    public func chat(sessionId: String, after: Int = 0) throws -> ChatJSON {
+        guard let session = session(id: sessionId) else { throw SessionManagerError.unknownSession(sessionId) }
+        let entries = session.state.transcriptPath.map(session.agent.transcript(at:)) ?? []
+        return Chat.page(Chat.items(entries), after: after)
+    }
+
+    // MARK: requests and messages
+
+    /// Open and recently resolved approvals and questions, oldest first.
+    public var actionRequests: [ActionRequestJSON] { requests.all }
+
+    public var messageReceipts: [MessageReceiptJSON] { messages.all }
+
+    @discardableResult
+    public func answer(requestId: String, decision: RemoteDecision) throws -> ActionRequestJSON {
+        try requests.answer(requestId, decision: decision)
+    }
+
+    /// Types `text` into the session as a prompt, only while the agent waits for one. A repeated `messageId`
+    /// returns the first send's receipt instead of typing it again.
+    public func send(sessionId: String, messageId: String, text: String) throws -> MessageReceiptJSON {
+        guard let session = session(id: sessionId) else { throw SessionManagerError.unknownSession(sessionId) }
+        return try messages.send(id: messageId, sessionId: sessionId, text: text, idle: session.state.status == .idle) {
+            session.process.write($0)
+        }
+    }
+
+    /// Esc: stops the agent's current turn, not its process. Claude Code reports no hook for an interrupted
+    /// turn, so the turn is ended here; a hook that does come later sets the status again.
+    public func interrupt(sessionId: String) throws {
+        guard let session = session(id: sessionId) else { throw SessionManagerError.unknownSession(sessionId) }
+        session.process.write(Data([0x1B]))
+        requests.expire(sessionId: sessionId, reason: "interrupted")
+        session.apply([.turnFinished(lastMessage: nil)])
     }
 
     /// Relaunches the sessions open when the server last stopped, if the General setting allows it.
@@ -259,6 +327,42 @@ public final class SessionManager: @unchecked Sendable {
         case .statusline: session.receive(statusLine: message.payload)
         case .event, .request: session.receive(hook: message.payload)
         }
+        // No request outlives its turn: a hook still waiting then was cancelled, or answered in the terminal.
+        let payload = session.agent.hookDialect.normalize(message.payload)
+        switch payload["hook_event_name"]?.stringValue {
+        case "UserPromptSubmit":
+            requests.expire(sessionId: session.id, reason: "answered in the terminal")
+            messages.promptSubmitted(sessionId: session.id, prompt: payload["prompt"]?.stringValue ?? "")
+        case "Stop":
+            requests.expire(sessionId: session.id, reason: "turn ended")
+            // Tagged per session, so a device shows only the latest turn's end.
+            let json = session.json
+            push.notify(PushPayload(title: "Turn finished · \(json.title)",
+                                    body: PushNotifier.clipped(json.state.lastMessage ?? "Ready for your next message."),
+                                    sessionId: session.id, tag: "turn-\(session.id)"))
+        case "SessionEnd": requests.expire(sessionId: session.id, reason: "session ended")
+        default: break
+        }
+    }
+
+    /// Holds the hook for an answer from a browser when the agent can take one; otherwise its terminal asks,
+    /// as in the Mac app.
+    private func open(_ message: WireMessage, reply: @escaping (String?) -> Void) {
+        // Every request an agent answers remotely can be denied, which is also what a timeout sends.
+        guard let session = session(id: message.sessionId),
+              session.agent.hookOutput(for: message.payload, decision: .deny(message: "", interrupt: false)) != nil else {
+            reply(nil)
+            return
+        }
+        let request = requests.open(sessionId: session.id, agent: session.agent, payload: message.payload, reply: reply)
+        let question = request.input["questions"]?[0]?["question"]?.stringValue
+        if request.kind == "question" {
+            session.apply([.needsAttention(message: question.map { "Question: " + $0 } ?? "Question")])
+        }
+        push.notify(PushPayload(title: (request.kind == "question" ? "Question · " : "Approval needed · ") + session.json.title,
+                                body: PushNotifier.clipped(question ?? request.title),
+                                sessionId: session.id, tag: "request-\(request.id)"),
+                    urgency: "high")
     }
 
     private func broadcast(_ event: ServerEvent) {

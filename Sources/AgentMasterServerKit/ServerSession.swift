@@ -69,7 +69,8 @@ public final class ServerSession: @unchecked Sendable {
         apply([.sessionEnded(reason: "process_exit")])
     }
 
-    private func apply(_ events: [SessionEvent]) {
+    /// Also for what the server itself knows of, outside the agent's hooks (a request it timed out).
+    func apply(_ events: [SessionEvent]) {
         guard !events.isEmpty else { return }
         let now = Date()
         lock.lock()

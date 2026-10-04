@@ -2,9 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>AgentMaster</title>
   <link rel="icon" href="icon.png" type="image/png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#1e1e22">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <!-- Not black-translucent: under the status bar, iOS sizes a home-screen app shorter than the screen by
+       the status bar's height and leaves a band at the bottom that covers the composer. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="AgentMaster">
+  <link rel="apple-touch-icon" href="icon.png">
   <link rel="stylesheet" href="vendor/xterm.css">
   <link rel="stylesheet" href="app.css">
 </head>
@@ -27,19 +35,45 @@
         <button id="open-settings" class="icon-button" title="Settings">⚙︎</button>
       </div>
       <div id="groups" class="groups"></div>
+      <div id="mobile-sessions" class="mobile-sessions"></div>
       <div id="connection" class="connection" hidden>Reconnecting…</div>
       <button id="new-session" class="new-session">＋ New session</button>
     </aside>
 
     <main class="main">
       <header id="header" class="header">
-        <div class="crumbs"><span class="dim">AgentMaster</span><span id="crumb-project"></span><span id="crumb-session"></span></div>
+        <div class="crumbs">
+          <button id="mobile-back" class="icon-button mobile-only" title="Back" hidden>‹</button>
+          <span class="dim">AgentMaster</span><span id="crumb-project"></span><span id="crumb-session"></span>
+        </div>
         <div class="header-right">
+          <div id="view-toggle" class="view-toggle" hidden>
+            <button data-view="chat" class="selected">Chat</button>
+            <button data-view="terminal">Terminal</button>
+          </div>
           <span id="usage" class="usage"></span>
           <button id="toggle-inspector" class="icon-button" title="Toggle inspector (Alt+0)">▤</button>
         </div>
       </header>
       <div id="attention" class="attention" hidden></div>
+      <details id="mobile-changes" class="mobile-changes">
+        <summary>Changes <span id="mobile-changes-count" class="count"></span></summary>
+        <div id="mobile-changes-body" class="mobile-changes-body"></div>
+      </details>
+      <div id="chat-pane" class="chat-pane" hidden>
+        <div id="chat-scroll" class="chat-scroll">
+          <div id="chat-messages" class="chat-messages"></div>
+          <div id="chat-requests" class="chat-requests"></div>
+        </div>
+        <form id="composer" class="chat-composer">
+          <div id="composer-hint" class="composer-hint" hidden></div>
+          <div id="composer-status" class="composer-status"></div>
+          <div class="composer-row">
+            <textarea id="composer-text" placeholder="Message…" rows="1"></textarea>
+            <button id="composer-send" type="submit" class="primary">Send</button>
+          </div>
+        </form>
+      </div>
       <div id="terminals" class="terminals">
         <div id="empty" class="empty">
           <p class="dim">No session</p>
@@ -106,6 +140,7 @@
   <script src="vendor/xterm.js"></script>
   <script src="vendor/addon-fit.js"></script>
   <script src="vendor/addon-web-links.js"></script>
+  <script src="vendor/marked.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

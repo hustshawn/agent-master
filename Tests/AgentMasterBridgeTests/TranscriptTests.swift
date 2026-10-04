@@ -10,10 +10,10 @@ final class TranscriptTests: XCTestCase {
     func testClaudeKeepsPromptsRepliesAndToolsButNotCommandsOrMeta() throws {
         XCTAssertEqual(TranscriptParser.claude(try fixture("claude-transcript")), [
             .user("Add a POST /orders endpoint"),
-            .tool(name: "Read", input: #"{"file_path":"app/main.py"}"#),
-            .toolResult("from fastapi import FastAPI"),
-            .tool(name: "Bash", input: #"{"command":"pytest"}"#),
-            .toolResult("1 passed"),
+            .tool(name: "Read", input: #"{"file_path":"app/main.py"}"#, id: "t1"),
+            .toolResult("from fastapi import FastAPI", id: "t1"),
+            .tool(name: "Bash", input: #"{"command":"pytest"}"#, id: "t2"),
+            .toolResult("1 passed", id: "t2"),
             .assistant("Added the endpoint."),
         ])
     }
@@ -21,10 +21,10 @@ final class TranscriptTests: XCTestCase {
     func testCodexSkipsInjectedInstructionsAndReasoning() throws {
         XCTAssertEqual(TranscriptParser.codex(try fixture("codex-transcript")), [
             .user("Fix formatPrice"),
-            .tool(name: "exec_command", input: #"{"cmd":"cat src/format.ts"}"#),
-            .toolResult("export function formatPrice"),
-            .tool(name: "apply_patch", input: "*** Begin Patch"),
-            .toolResult("Success"),
+            .tool(name: "exec_command", input: #"{"cmd":"cat src/format.ts"}"#, id: "c1"),
+            .toolResult("export function formatPrice", id: "c1"),
+            .tool(name: "apply_patch", input: "*** Begin Patch", id: "c2"),
+            .toolResult("Success", id: "c2"),
             .assistant("Fixed it."),
         ])
     }
@@ -33,8 +33,8 @@ final class TranscriptTests: XCTestCase {
         XCTAssertEqual(TranscriptParser.kiro(try fixture("kiro-transcript")), [
             .user("Sort the rows"),
             .assistant("Let me look."),
-            .tool(name: "read", input: #"{"path":"main.go"}"#),
-            .toolResult("package main"),
+            .tool(name: "read", input: #"{"path":"main.go"}"#, id: "u1"),
+            .toolResult("package main", id: "u1"),
             .assistant("Sorted."),
         ])
     }

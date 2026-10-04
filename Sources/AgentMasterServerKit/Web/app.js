@@ -38,6 +38,17 @@ const state = {
   terminals: new Map(),       // id -> { term, fit, socket, node, alive }
   renaming: null,
   events: null,
+  lastUpdate: null,
+  hashSelectionApplied: false,
+  mobilePage: "list",         // "list" or "detail" at narrow widths
+  requests: new Map(),        // id -> ActionRequestJSON
+  messages: new Map(),        // id -> MessageReceiptJSON
+  chats: new Map(),           // sessionId -> ChatItemJSON[]
+  chatFetching: new Set(),    // sessionId currently mid-fetch
+  chatTimers: new Map(),      // sessionId -> { soon, late } refetch timeouts
+  chatStuck: new Map(),       // sessionId -> whether the transcript is scrolled to the bottom
+  answerDrafts: new Map(),    // requestId -> Map(question -> Set(chosen labels))
+  pendingMessageIds: new Map(), // sessionId -> client message id, kept across a retry
 };
 
 // MARK: token and API
@@ -124,21 +135,46 @@ function connectEvents(delay = 500) {
     const event = JSON.parse(message.data);
     if (event.type === "snapshot") {
       state.sessions = new Map(event.sessions.map((s) => [s.id, s]));
+      state.requests = new Map((event.requests ?? []).map((r) => [r.id, r]));
+      state.messages = new Map((event.messages ?? []).map((m) => [m.id, m]));
       for (const id of [...state.terminals.keys()]) if (!state.sessions.has(id)) disposeTerminal(id);
+      applyHashSelection();
     } else if (event.type === "session") {
       state.sessions.set(event.session.id, event.session);
+      if (event.session.id === state.selectedId) scheduleChatFetch(event.session.id);
     } else if (event.type === "removed") {
       state.sessions.delete(event.id);
       disposeTerminal(event.id);
       if (state.selectedId === event.id) state.selectedId = null;
+    } else if (event.type === "request") {
+      state.requests.set(event.request.id, event.request);
+    } else if (event.type === "message") {
+      state.messages.set(event.message.id, event.message);
     }
+    state.lastUpdate = Date.now();
     render();
   };
   socket.onclose = () => {
     if (state.events !== socket || $("app").hidden) return;
     $("connection").hidden = false;
+    $("connection").textContent = state.lastUpdate ? "Offline — last updated " + formatClock(state.lastUpdate) : "Offline";
     setTimeout(() => connectEvents(Math.min(delay * 2, 8000)), delay);
   };
+}
+
+function formatClock(ms) {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/// `/#session=<id>` (e.g. from a push notification) selects that session once there is something to select.
+function applyHashSelection() {
+  if (state.hashSelectionApplied) return;
+  const match = location.hash.match(/session=([^&]+)/);
+  if (!match) return;
+  const id = decodeURIComponent(match[1]);
+  if (!state.sessions.has(id)) return;
+  state.hashSelectionApplied = true;
+  select(id);
 }
 
 /// A session the POST just created. The event stream is the source of truth and may already carry a newer
@@ -166,7 +202,18 @@ function selected() {
 
 function select(id) {
   state.selectedId = id;
-  if (id) localStorage.setItem("am.selected", id);
+  if (id) {
+    localStorage.setItem("am.selected", id);
+    state.mobilePage = "detail";
+    fetchChat(id);
+  }
+  render();
+}
+
+/// The mobile back button: returns to the session list without losing the selection, so the terminal
+/// and chat state are still there when the user taps back in.
+function goBack() {
+  state.mobilePage = "list";
   render();
 }
 
@@ -174,6 +221,8 @@ function select(id) {
 
 function render() {
   if (!selected() && state.sessions.size > 0) state.selectedId = sortedSessions()[0].id;
+  // At narrow widths the sidebar and the main pane are two full-screen pages; see the mobile-detail rule in app.css.
+  $("app").classList.toggle("mobile-detail", state.mobilePage === "detail" && !!selected());
   renderSidebar();
   renderMain();
   renderInspector();
@@ -193,6 +242,40 @@ function renderSidebar() {
     const rows = collapsed ? null : el("div", { class: "rows" }, group.rows.map(sessionRow));
     return el("div", { class: "group" }, header, rows);
   }));
+  renderMobileSessions();
+}
+
+/// The flat, narrow-width session list: sessions needing attention first, then running, then the rest.
+function mobileSortedSessions() {
+  const rank = { needsAttention: 0, running: 1 };
+  return [...state.sessions.values()].sort((a, b) => {
+    const diff = (rank[a.status] ?? 2) - (rank[b.status] ?? 2);
+    return diff !== 0 ? diff : b.createdAt - a.createdAt;
+  });
+}
+
+function renderMobileSessions() {
+  $("mobile-sessions").replaceChildren(...mobileSortedSessions().map(mobileSessionRow));
+}
+
+function mobileSessionRow(session) {
+  const [glyph, color] = STATUS[session.status] ?? STATUS.idle;
+  const agent = state.agents.find((a) => a.id === session.agentId);
+  return el("div", { class: "mobile-row", onclick: () => select(session.id) },
+    agent ? glyphSVG(agent.glyph, 28) : el("span"),
+    el("div", { class: "mobile-row-texts" },
+      el("div", { class: "mobile-row-title" }, session.title),
+      el("div", { class: "mobile-row-meta" }, `${session.projectName} · ${relativeTime(session.createdAt)}`)),
+    el("span", { class: "mobile-row-status", style: `color:${color}` }, glyph));
+}
+
+/// Only `createdAt` is available for sessions today; a true last-activity timestamp would need a server change.
+function relativeTime(epochSeconds) {
+  const seconds = Math.max(0, Date.now() / 1000 - epochSeconds);
+  if (seconds < 60) return "now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
 }
 
 function sessionRow(session) {
@@ -244,8 +327,23 @@ function renderMain() {
   const attention = session?.status === "needsAttention" ? session.state.attentionMessage : null;
   $("attention").hidden = !attention;
   $("attention").textContent = attention ? "◆ " + attention : "";
-  for (const [id, entry] of state.terminals) entry.node.hidden = id !== session?.id;
-  if (session) showTerminal(session);
+  $("mobile-back").hidden = !session;
+
+  const view = session ? chatViewFor(session.id) : "chat";
+  $("view-toggle").hidden = !session;
+  for (const button of $("view-toggle").children) button.classList.toggle("selected", button.dataset.view === view);
+  $("chat-pane").hidden = !session || view !== "chat";
+  // Out of the layout while the chat shows, or it takes half the height below the composer.
+  $("terminals").hidden = !!session && view === "chat";
+  for (const [id, entry] of state.terminals) entry.node.hidden = id !== session?.id || view !== "terminal";
+  if (session && view === "terminal") showTerminal(session);
+  if (session && view === "chat") renderChat();
+  renderMobileChanges(session);
+}
+
+/// Each session remembers its own choice of chat vs. terminal, like the Mac app remembers panel layout.
+function chatViewFor(id) {
+  return localStorage.getItem("am.view." + id) ?? "chat";
 }
 
 function usageParts(session) {
@@ -364,6 +462,267 @@ function disposeTerminal(id) {
   state.terminals.delete(id);
 }
 
+// MARK: chat
+
+// marked renders everything else as usual, but raw HTML tokens (inline or block) are escaped instead of
+// passed through: an agent's transcript is not trusted content, and the chat view must not run it as markup.
+const mdRenderer = new marked.Renderer();
+mdRenderer.html = (token) => escapeHtml(token.text ?? token.raw ?? "");
+marked.setOptions({ renderer: mdRenderer, breaks: true });
+
+function escapeHtml(text) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/// Debounced per `docs/superpowers/specs/2026-10-04-cross-device-design.md` 4.3: a quick refetch plus one
+/// later one, since the transcript is flushed slightly after the hook that triggered the `session` event.
+function scheduleChatFetch(id) {
+  const timers = state.chatTimers.get(id) ?? {};
+  clearTimeout(timers.soon);
+  clearTimeout(timers.late);
+  timers.soon = setTimeout(() => fetchChat(id), 300);
+  timers.late = setTimeout(() => fetchChat(id), 800);
+  state.chatTimers.set(id, timers);
+}
+
+async function fetchChat(id) {
+  // Guards against two overlapping fetches (e.g. select() and a debounced refetch) racing on the same
+  // cached snapshot; the one already in flight will pick up anything the other would have fetched.
+  if (!state.sessions.has(id) || state.chatFetching.has(id)) return;
+  state.chatFetching.add(id);
+  const cached = state.chats.get(id) ?? [];
+  let page;
+  try {
+    page = await api("GET", `/api/sessions/${id}/chat?after=${cached.length}`);
+  } catch {
+    state.chatFetching.delete(id);
+    return;   // transient; the next scheduled or user-triggered fetch will catch up
+  }
+  state.chatFetching.delete(id);
+  state.chats.set(id, [...cached.slice(0, page.start), ...page.items]);
+  if (id === state.selectedId) renderChat();
+}
+
+/// Consecutive tool calls fold into one "N steps" group; everything else renders on its own.
+function groupChatItems(items) {
+  const groups = [];
+  let run = [];
+  const flush = () => {
+    if (run.length) groups.push(run.length > 1 ? { type: "steps", items: run } : { type: "step", item: run[0] });
+    run = [];
+  };
+  for (const item of items) {
+    if (item.kind === "tool") run.push(item);
+    else { flush(); groups.push({ type: item.kind, item }); }
+  }
+  flush();
+  return groups;
+}
+
+function renderChat() {
+  const session = selected();
+  if (!session) return;
+  const items = state.chats.get(session.id) ?? [];
+  const lastItem = items[items.length - 1];
+  const stepNode = (item) => stepRow(item, item === lastItem, session);
+  $("chat-messages").replaceChildren(...groupChatItems(items).map((group) => {
+    if (group.type === "user") return userBubble(group.item);
+    if (group.type === "assistant") return assistantBubble(group.item);
+    if (group.type === "step") return stepNode(group.item);
+    return el("details", { class: "step-group" },
+      el("summary", {}, `${group.items.length} steps`),
+      el("div", { class: "step-group-body" }, group.items.map(stepNode)));
+  }));
+  const pending = [...state.requests.values()].filter((r) => r.sessionId === session.id)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  $("chat-requests").replaceChildren(...pending.map(requestCard));
+  renderComposer(session);
+  if (state.chatStuck.get(session.id) ?? true) {
+    const scroll = $("chat-scroll");
+    requestAnimationFrame(() => { scroll.scrollTop = scroll.scrollHeight; });
+  }
+}
+
+$("chat-scroll").addEventListener("scroll", () => {
+  const scroll = $("chat-scroll");
+  state.chatStuck.set(state.selectedId, scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40);
+});
+
+function userBubble(item) {
+  return el("div", { class: "msg msg-user" }, el("div", { class: "bubble" }, item.text));
+}
+
+function assistantBubble(item) {
+  const bubble = el("div", { class: "bubble markdown" });
+  bubble.innerHTML = marked.parse(item.text ?? "");
+  return el("div", { class: "msg msg-assistant" }, bubble);
+}
+
+function stepGlyph(item, isLast, session) {
+  if (item.output !== undefined && item.output !== null) return el("span", { class: "step-glyph done" }, "✓");
+  if (isLast && (session.status === "running" || session.status === "needsAttention")) {
+    return el("span", { class: "step-glyph spin" }, "◐");
+  }
+  return el("span", { class: "step-glyph" });
+}
+
+function stepRow(item, isLast, session) {
+  return el("details", { class: "step" },
+    el("summary", {}, stepGlyph(item, isLast, session), el("span", { class: "step-title" }, item.title ?? item.name)),
+    el("div", { class: "step-body" },
+      el("div", { class: "step-label" }, "Input"), el("pre", {}, item.input ?? ""),
+      item.output != null ? el("div", { class: "step-label" }, "Output") : null,
+      item.output != null ? el("pre", {}, item.output) : null));
+}
+
+// MARK: pending requests
+
+function requestCard(request) {
+  if (request.status !== "pending") return resolvedCard(request);
+  return request.kind === "permission" ? permissionCard(request) : questionCard(request);
+}
+
+function permissionCard(request) {
+  return el("div", { class: "request-card" },
+    el("div", { class: "request-title" }, request.title),
+    el("pre", { class: "request-detail" }, detailText(request.input)),
+    el("div", { class: "request-actions" },
+      el("button", { class: "primary", onclick: () => decide(request.id, { behavior: "allow" }) }, "Allow"),
+      el("button", { onclick: () => decide(request.id, { behavior: "deny" }) }, "Deny")));
+}
+
+function detailText(input) {
+  if (typeof input?.command === "string") return input.command;
+  if (typeof input?.file_path === "string") return input.file_path;
+  return JSON.stringify(input, null, 2);
+}
+
+function questionCard(request) {
+  const questions = request.input?.questions ?? [];
+  const draft = state.answerDrafts.get(request.id) ?? new Map();
+  state.answerDrafts.set(request.id, draft);
+  const blocks = questions.map((question) => {
+    const chosen = draft.get(question.question) ?? new Set();
+    draft.set(question.question, chosen);
+    const toggle = (label) => {
+      if (question.multiSelect) { chosen.has(label) ? chosen.delete(label) : chosen.add(label); }
+      else { chosen.clear(); chosen.add(label); }
+      renderChat();
+    };
+    return el("div", { class: "question" },
+      el("div", { class: "question-header" }, question.header || question.question),
+      question.header ? el("div", { class: "question-text" }, question.question) : null,
+      el("div", { class: "options-row" }, (question.options ?? []).map((option) =>
+        el("button", { type: "button", class: "chip" + (chosen.has(option.label) ? " selected" : ""),
+                      title: option.description ?? "", onclick: () => toggle(option.label) }, option.label))));
+  });
+  const answered = questions.every((q) => (draft.get(q.question) ?? new Set()).size > 0);
+  return el("div", { class: "request-card" },
+    el("div", { class: "request-title" }, request.title),
+    blocks,
+    el("div", { class: "request-actions" },
+      el("button", { class: "primary", disabled: !answered, onclick: () => submitAnswers(request, questions, draft) },
+         "Submit")));
+}
+
+async function submitAnswers(request, questions, draft) {
+  const answers = {};
+  for (const question of questions) answers[question.question] = [...(draft.get(question.question) ?? [])].join(", ");
+  try {
+    await decide(request.id, { answers });
+    state.answerDrafts.delete(request.id);
+  } catch {}
+}
+
+function resolvedCard(request) {
+  return el("div", { class: "request-card resolved" },
+    el("div", { class: "request-title" }, request.title),
+    el("div", { class: "request-outcome" }, outcomeText(request)));
+}
+
+function outcomeText(request) {
+  if (request.status === "expired") return "Expired — " + (request.outcome ?? "timed out");
+  if (request.kind === "permission") return request.outcome === "allowed" ? "Allowed" : "Denied";
+  return "Answered";
+}
+
+async function decide(requestId, body) {
+  try {
+    await api("POST", `/api/requests/${requestId}`, body);
+  } catch (error) {
+    // A 409 (answered elsewhere, or expired) is already reflected by the request event that caused it;
+    // anything else is worth telling the user about.
+    if (!/already/.test(error.message)) alert(error.message);
+  }
+}
+
+// MARK: composer
+
+function renderComposer(session) {
+  const idle = session.status === "idle";
+  $("composer-text").disabled = !idle;
+  $("composer-send").disabled = !idle;
+  const hint = $("composer-hint");
+  hint.hidden = idle;
+  if (session.status === "running" || session.status === "needsAttention") {
+    hint.replaceChildren("Agent is working — ",
+      el("button", { type: "button", class: "link", onclick: () => interruptSession(session) }, "Interrupt"));
+  } else if (session.status === "starting") {
+    hint.replaceChildren("Starting…");
+  } else if (session.status === "ended") {
+    hint.replaceChildren("Session ended.");
+  }
+  const receipts = [...state.messages.values()].filter((m) => m.sessionId === session.id);
+  const last = receipts.length ? receipts.reduce((a, b) => (a.createdAt > b.createdAt ? a : b)) : null;
+  $("composer-status").textContent = last ? receiptText(last) : "";
+}
+
+function receiptText(receipt) {
+  return receipt.status === "written" ? "Sent" : receipt.status === "delivered" ? "Delivered" : "Not confirmed";
+}
+
+async function interruptSession(session) {
+  try { await api("POST", `/api/sessions/${session.id}/interrupt`); } catch (error) { alert(error.message); }
+}
+
+async function sendMessage(session) {
+  const textarea = $("composer-text");
+  const text = textarea.value;
+  if (!text.trim() || textarea.disabled) return;
+  const id = state.pendingMessageIds.get(session.id) ?? crypto.randomUUID();
+  state.pendingMessageIds.set(session.id, id);
+  $("composer-send").disabled = true;
+  try {
+    const receipt = await api("POST", `/api/sessions/${session.id}/messages`, { id, text });
+    state.messages.set(receipt.id, receipt);
+    state.pendingMessageIds.delete(session.id);
+    textarea.value = "";
+    autosizeComposer(textarea);
+  } catch (error) {
+    $("composer-status").textContent = error.message;
+  } finally {
+    renderComposer(session);
+  }
+}
+
+function autosizeComposer(textarea) {
+  textarea.style.height = "auto";
+  textarea.style.height = Math.min(textarea.scrollHeight, 160) + "px";
+}
+
+$("composer").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const session = selected();
+  if (session) sendMessage(session);
+});
+$("composer-text").addEventListener("input", (event) => autosizeComposer(event.target));
+$("composer-text").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || window.matchMedia("(max-width: 700px)").matches) return;
+  event.preventDefault();
+  const session = selected();
+  if (session) sendMessage(session);
+});
+
 // MARK: inspector
 
 function renderInspector() {
@@ -385,7 +744,12 @@ function renderInspector() {
       el("span", { style: `color:${agent.finishedAt ? "#a6e3a1" : "#8abeb7"}` }, agent.finishedAt ? "✓" : "◈"),
       el("span", {}, `${agent.type}${agent.description ? " — " + agent.description : ""} · ${duration(seconds)}`));
   }));
-  panel("changes", s?.changes.length, (s?.changes ?? []).map((change) =>
+  panel("changes", s?.changes.length, changesList(session));
+}
+
+/// Shared by the desktop inspector's CHANGES panel and the mobile detail page's collapsible Changes list.
+function changesList(session) {
+  return (session?.state.changes ?? []).map((change) =>
     el("details", { class: "change" },
       el("summary", {}, el("span", {}, shortPath(change.path, session.projectPath)),
          el("span", { class: "added" }, `+${change.added}`), el("span", { class: "removed" }, `−${change.removed}`)),
@@ -393,7 +757,13 @@ function renderInspector() {
         el("div", { class: "hunk" }, hunk.header),
         ...hunk.lines.map((line) => el("div", { class: "line-" + line.kind },
                                        (line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ") + line.text)),
-      ])))));
+      ]))));
+}
+
+function renderMobileChanges(session) {
+  const count = session?.state.changes.length ?? 0;
+  $("mobile-changes-count").textContent = count ? `(${count})` : "";
+  $("mobile-changes-body").replaceChildren(...(count ? changesList(session) : [el("div", { class: "empty-line" }, "—")]));
 }
 
 function duration(seconds) {
@@ -412,6 +782,15 @@ function toggleInspector() {
   localStorage.setItem("am.inspectorCollapsed", String(collapsed));
   const entry = state.terminals.get(state.selectedId);
   if (entry) requestAnimationFrame(() => fitTerminal(entry));
+}
+
+$("mobile-back").onclick = goBack;
+for (const button of $("view-toggle").children) {
+  button.onclick = () => {
+    const session = selected();
+    if (session) localStorage.setItem("am.view." + session.id, button.dataset.view);
+    render();
+  };
 }
 
 // MARK: glyphs
@@ -593,27 +972,35 @@ $("folder-choose").onclick = () => {
 // MARK: settings
 
 let settingsPage = null;
+/// On a phone, Settings shows its list first and then one page at a time, like iOS Settings.
+let settingsListShown = false;
 
 $("open-settings").onclick = async () => {
   try { await loadAgents(); } catch { return; }
   settingsPage = settingsPage ?? state.agents[0]?.id ?? "general";
+  settingsListShown = window.matchMedia("(max-width: 700px)").matches;
   renderSettings();
   $("settings-dialog").showModal();
 };
 $("settings-close").onclick = () => $("settings-dialog").close();
 
 function renderSettings() {
+  const open = (page) => { settingsPage = page; settingsListShown = false; renderSettings(); };
+  const chevron = () => el("span", { class: "chevron mobile-only" }, "›");
   $("settings-nav").replaceChildren(
+    el("h2", { class: "settings-title mobile-only" }, "Settings"),
     el("div", { class: "heading" }, "AGENTS"),
     ...state.agents.map((agent) => el("div", {
-      class: "item" + (settingsPage === agent.id ? " selected" : ""),
-      onclick: () => { settingsPage = agent.id; renderSettings(); },
-    }, glyphSVG(agent.glyph, 18), agent.name)),
+      class: "item" + (settingsPage === agent.id ? " selected" : ""), onclick: () => open(agent.id),
+    }, glyphSVG(agent.glyph, 18), agent.name, chevron())),
     el("div", { class: "spacer" }),
-    el("div", { class: "item" + (settingsPage === "general" ? " selected" : ""),
-                onclick: () => { settingsPage = "general"; renderSettings(); } }, "⚙︎  General"));
+    el("div", { class: "item" + (settingsPage === "general" ? " selected" : ""), onclick: () => open("general") },
+       "⚙︎  General", chevron()));
+  $("settings-nav").parentElement.classList.toggle("showing-list", settingsListShown);
   const agent = state.agents.find((a) => a.id === settingsPage);
-  $("settings-page").replaceChildren(...(agent ? agentPage(agent) : generalPage()));
+  const back = el("button", { class: "settings-back mobile-only",
+                              onclick: () => { settingsListShown = true; renderSettings(); } }, "‹ Settings");
+  $("settings-page").replaceChildren(back, ...(agent ? agentPage(agent) : generalPage()));
 }
 
 function agentPage(agent) {
@@ -681,9 +1068,131 @@ function generalPage() {
             state.restoreSessionsOnLaunch = e.target.checked;
           } catch (error) { alert(error.message); }
         } }), el("span")))),
+    el("p", { class: "section-title" }, "Notifications"),
+    notificationsSection(),
   ];
 }
 
-// Pasting the printed link into a tab that is already open only changes the hash.
-window.addEventListener("hashchange", () => { if (/token=/.test(location.hash)) start(); });
+// MARK: push notifications
+
+/// iOS Safari only grants Web Push to a PWA added to the home screen; everywhere else, service workers
+/// and the Push API are the only requirement.
+function pushSupportStatus() {
+  // iPadOS asks for desktop sites by default and then reports itself as a Mac with a touch screen.
+  const isIOS = /iP(hone|od|ad)/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  const standalone = navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+  if (isIOS && !standalone) return "needs-install";
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return "unsupported";
+  return "ok";
+}
+
+/// The service worker's registration, or an error saying why there is none, instead of waiting forever
+/// on `navigator.serviceWorker.ready` when it never installed.
+async function serviceWorkerRegistration() {
+  if (serviceWorkerError) throw new Error("The service worker did not register: " + serviceWorkerError);
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("The service worker did not start. Reload the page and try again.")), 5000));
+  return Promise.race([navigator.serviceWorker.ready, timeout]);
+}
+
+function notificationsSection() {
+  const status = pushSupportStatus();
+  const note = status === "unsupported" ? "Push notifications are not supported in this browser."
+    : status === "needs-install" ? "Add to Home Screen first, then open AgentMaster from there to enable notifications."
+    : null;
+  if (note) {
+    return el("div", { class: "options" }, el("div", { class: "option" },
+      el("div", { class: "label" }, el("div", {}, "Notifications on this device"), el("div", { class: "note" }, note))));
+  }
+  const container = el("div", { class: "options" });
+  loadNotificationsSection(container);
+  return container;
+}
+
+async function loadNotificationsSection(container) {
+  let subscription = null;
+  let devices = [];
+  let problem = null;
+  try {
+    subscription = await (await serviceWorkerRegistration()).pushManager.getSubscription();
+  } catch (error) { problem = error.message; }
+  try {
+    devices = (await api("GET", "/api/push/subscriptions")).subscriptions;
+  } catch {}
+  container.replaceChildren(
+    el("div", { class: "option" },
+      el("div", { class: "label" }, el("div", {}, "Notifications on this device"),
+        el("div", { class: "note" }, problem ?? (subscription ? "Enabled on this device."
+          : "Get notified when a session needs you, finishes a turn, or exits."))),
+      subscription
+        ? el("button", { onclick: () => disableNotifications(container) }, "Disable")
+        : el("button", { class: "primary", onclick: () => enableNotifications(container) }, "Enable")),
+    ...(devices.length ? [el("div", { class: "option" },
+      el("div", { class: "label" }, el("div", {}, "Registered devices")),
+      el("div", { class: "device-list" }, devices.map((device) => el("div", { class: "device-row" },
+        el("span", {}, device.label || device.endpoint.slice(-24)),
+        el("button", { onclick: () => removeDevice(device.endpoint, container) }, "Remove")))))] : []),
+    el("div", { class: "option" },
+      el("div", { class: "label" }, el("div", {}, "Test")),
+      el("button", { onclick: sendTestNotification }, "Send test notification")));
+}
+
+async function enableNotifications(container) {
+  try {
+    if (await Notification.requestPermission() !== "granted") throw new Error("Notifications permission was not granted.");
+    const { publicKey } = await api("GET", "/api/push/key");
+    const registration = await serviceWorkerRegistration();
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+    const json = subscription.toJSON();
+    await api("POST", "/api/push/subscriptions", { endpoint: json.endpoint, keys: json.keys, label: shortUserAgent() });
+  } catch (error) { alert(error.message); }
+  loadNotificationsSection(container);
+}
+
+async function disableNotifications(container) {
+  try {
+    const registration = await serviceWorkerRegistration();
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) {
+      await api("DELETE", "/api/push/subscriptions", { endpoint: subscription.endpoint });
+      await subscription.unsubscribe();
+    }
+  } catch (error) { alert(error.message); }
+  loadNotificationsSection(container);
+}
+
+async function removeDevice(endpoint, container) {
+  try { await api("DELETE", "/api/push/subscriptions", { endpoint }); } catch (error) { alert(error.message); }
+  loadNotificationsSection(container);
+}
+
+async function sendTestNotification() {
+  try { await api("POST", "/api/push/test"); } catch (error) { alert(error.message); }
+}
+
+/// A short label for the device list, e.g. "iPhone OS 17_5" instead of the whole user-agent string.
+function shortUserAgent() {
+  const match = navigator.userAgent.match(/(iPhone|iPad|Android|Macintosh|Windows)[^;)]*/);
+  return (match ? match[0] : navigator.userAgent).slice(0, 60);
+}
+
+function urlBase64ToUint8Array(base64url) {
+  const base64 = (base64url + "=".repeat((4 - (base64url.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from([...atob(base64)].map((c) => c.charCodeAt(0)));
+}
+
+let serviceWorkerError = null;
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch((error) => { serviceWorkerError = error.message || String(error); });
+}
+
+// Pasting the printed link into a tab that is already open only changes the hash; a notification click
+// does the same with `#session=`, so both are handled on hashchange as well as on first load.
+window.addEventListener("hashchange", () => {
+  if (/token=/.test(location.hash)) return start();
+  state.hashSelectionApplied = false;
+  applyHashSelection();
+});
 start();

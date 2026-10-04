@@ -2,6 +2,7 @@ import XCTest
 import AgentMasterCore
 import AgentMasterWire
 import AgentMasterBridge
+import Crypto
 @testable import AgentMasterServerKit
 
 /// The manager with a stand-in for `claude`: a script that prints a line and then echoes its input.
@@ -40,10 +41,24 @@ final class SessionManagerTests: XCTestCase {
             dataDirectory: root.appendingPathComponent("data"),
             executableURL: root.appendingPathComponent("server/agentmaster-server"),
             environment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory(),
-                          "AGENTMASTER_CLAUDE_PATH": root.appendingPathComponent("bin/claude").path]))
+                          "AGENTMASTER_CLAUDE_PATH": root.appendingPathComponent("bin/claude").path],
+            pushTransport: pushes))
         managers.append(manager)
         return manager
     }
+
+    /// Records the push messages the manager sends, by their Urgency header.
+    private final class Pushes: WebPushTransport, @unchecked Sendable {
+        private let lock = NSLock()
+        private var all: [String] = []
+        func post(url: URL, headers: [String: String], body: Data) async throws -> Int {
+            lock.withLock { all.append(headers["Urgency"] ?? "") }
+            return 201
+        }
+        var urgencies: [String] { lock.lock(); defer { lock.unlock() }; return all }
+    }
+
+    private let pushes = Pushes()
 
     private var project: String { SessionManager.realPath(root.appendingPathComponent("project").path) }
 
@@ -193,5 +208,139 @@ final class SessionManagerTests: XCTestCase {
         let second = try makeManager()
         XCTAssertEqual(second.agents().first { $0.id == "claude" }?.defaultModel, "opus")
         XCTAssertFalse(second.restoreSessionsOnLaunch)
+    }
+
+    // MARK: requests and messages
+
+    /// Sends `payload` as `agentmaster-hook` does. A request's connection stays open for the reply.
+    @discardableResult
+    private func hook(_ manager: SessionManager, _ sessionId: String, _ payload: JSONValue,
+                      kind: WireKind = .event) throws -> UnixSocketConnection {
+        let connection = try UnixSocket.connect(path: manager.paths.socketPath)
+        try connection.write(WireCodec.encodeLine(WireMessage(id: UUID().uuidString, sessionId: sessionId, kind: kind,
+                                                              payload: payload)))
+        if kind != .request { connection.close() }
+        return connection
+    }
+
+    private func reply(_ connection: UnixSocketConnection) throws -> JSONValue? {
+        let reply = try WireCodec.decode(WireReply.self, line: connection.readLine(timeout: 5))
+        connection.close()
+        return try reply.output.map { try JSONValue.parse(Data($0.utf8)) }
+    }
+
+    private let permission: JSONValue = ["hook_event_name": "PermissionRequest", "session_id": "c1", "tool_name": "Bash",
+                                         "tool_input": ["command": "swift test"]]
+
+    func testAnApprovalWaitsForTheFirstAnswerFromABrowser() throws {
+        let manager = try makeManager()
+        let events = Events()
+        _ = manager.subscribe { events.append($0) }
+        let session = try manager.create(projectPath: project)
+        let connection = try hook(manager, session.id, permission, kind: .request)
+        XCTAssertTrue(wait { manager.actionRequests.count == 1 })
+        let request = try XCTUnwrap(manager.actionRequests.first)
+        XCTAssertEqual(request.kind, "permission")
+        XCTAssertEqual(request.title, "$ swift test")
+        XCTAssertEqual(request.status, "pending")
+        XCTAssertEqual(manager.list().first?.status, "needsAttention")
+        XCTAssertTrue(events.list.contains { $0.type == "request" && $0.request?.id == request.id })
+
+        try manager.answer(requestId: request.id, decision: .allow)
+        XCTAssertEqual(try reply(connection)?["hookSpecificOutput"]?["decision"]?["behavior"], "allow")
+        XCTAssertThrowsError(try manager.answer(requestId: request.id, decision: .deny(message: "no", interrupt: false))) {
+            guard case ActionRequestError.notPending(let current) = $0 else { return XCTFail("\($0)") }
+            XCTAssertEqual(current.outcome, "allowed", "the second device sees the first answer")
+        }
+        XCTAssertEqual(manager.actionRequests.first?.status, "answered")
+    }
+
+    func testAQuestionIsAnsweredWithTheChosenOption() throws {
+        let manager = try makeManager()
+        let session = try manager.create(projectPath: project)
+        let connection = try hook(manager, session.id, [
+            "hook_event_name": "PreToolUse", "session_id": "c1", "tool_name": "AskUserQuestion", "tool_use_id": "t1",
+            "tool_input": ["questions": [["question": "Which API?", "options": [["label": "New"], ["label": "Both"]]]]],
+        ], kind: .request)
+        XCTAssertTrue(wait { manager.list().first?.state.attentionMessage == "Question: Which API?" })
+        let request = try XCTUnwrap(manager.actionRequests.first)
+        XCTAssertEqual(request.kind, "question")
+        XCTAssertThrowsError(try manager.answer(requestId: request.id, decision: .allow)) {
+            guard case ActionRequestError.unsupportedDecision = $0 else { return XCTFail("\($0)") }
+        }
+        try manager.answer(requestId: request.id, decision: .answer(["Which API?": "New"]))
+        XCTAssertEqual(try reply(connection)?["hookSpecificOutput"]?["updatedInput"]?["answers"], ["Which API?": "New"])
+    }
+
+    func testARequestEndsWithItsTurn() throws {
+        let manager = try makeManager()
+        let session = try manager.create(projectPath: project)
+        let connection = try hook(manager, session.id, permission, kind: .request)
+        XCTAssertTrue(wait { manager.actionRequests.count == 1 })
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1"])
+        XCTAssertNil(try reply(connection), "the hook is released without a decision")
+        XCTAssertEqual(manager.actionRequests.first?.status, "expired")
+        XCTAssertEqual(manager.actionRequests.first?.outcome, "turn ended")
+    }
+
+    func testAnUnansweredRequestTimesOutWithADenyThatStopsTheAgent() throws {
+        let store = ActionRequestStore(timeout: 0.1)
+        let output = Output()
+        let request = store.open(sessionId: "s1", agent: ClaudeCodeAgent(), payload: permission) { output.append(Data(($0 ?? "").utf8)) }
+        XCTAssertTrue(wait { store.all.first?.status == "expired" })
+        XCTAssertEqual(store.all.first?.outcome, "timed out")
+        let decision = try JSONValue.parse(Data(output.text.utf8))["hookSpecificOutput"]?["decision"]
+        XCTAssertEqual(decision?["behavior"], "deny")
+        XCTAssertEqual(decision?["interrupt"], true)
+        XCTAssertThrowsError(try store.answer(request.id, decision: .allow))
+    }
+
+    func testDevicesArePushedWhenARequestWaitsATurnEndsOrTheAgentExits() throws {
+        let manager = try makeManager()
+        let device = P256.KeyAgreement.PrivateKey().publicKey.x963Representation
+        manager.push.store.add(PushSubscription(endpoint: "https://web.push.apple.com/abc",
+                                                keys: .init(p256dh: Base64URL.encode(device),
+                                                            auth: Base64URL.encode(Data(repeating: 7, count: 16)))))
+        let session = try manager.create(projectPath: project)
+        let connection = try hook(manager, session.id, permission, kind: .request)
+        XCTAssertTrue(wait { self.pushes.urgencies == ["high"] }, "\(pushes.urgencies)")
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1"])
+        XCTAssertTrue(wait { self.pushes.urgencies == ["high", "normal"] }, "\(pushes.urgencies)")
+        _ = try reply(connection)
+        try XCTUnwrap(manager.session(id: session.id)).process.write(Data([0x04]))   // the agent quits by itself
+        XCTAssertTrue(wait { self.pushes.urgencies.count == 3 }, "\(pushes.urgencies)")
+        let closed = try manager.create(projectPath: project)
+        try manager.close(id: closed.id)
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(pushes.urgencies.count, 3, "closing a session is not news")
+    }
+
+    func testAMessageIsTypedOnceAndConfirmedByThePrompt() throws {
+        let manager = try makeManager()
+        let session = try manager.create(projectPath: project)
+        let output = Output()
+        let process = try XCTUnwrap(manager.session(id: session.id)).process
+        _ = process.subscribe { output.append($0) }
+        XCTAssertThrowsError(try manager.send(sessionId: session.id, messageId: "m0", text: "hi"), "not ready for a prompt")
+
+        try hook(manager, session.id, ["hook_event_name": "SessionStart", "session_id": "c1", "cwd": .string(project)])
+        XCTAssertTrue(wait { manager.list().first?.status == "idle" })
+        let receipt = try manager.send(sessionId: session.id, messageId: "m1", text: "Fix it\nplease ")
+        XCTAssertEqual(receipt.status, "written")
+        XCTAssertEqual(receipt.text, "Fix it\nplease")
+        XCTAssertTrue(wait { output.text.contains("Fix it") }, output.text)
+        XCTAssertEqual(try manager.send(sessionId: session.id, messageId: "m1", text: "Fix it\nplease"), receipt,
+                       "a retry gets the first receipt")
+        XCTAssertThrowsError(try manager.send(sessionId: session.id, messageId: "m2", text: "more"), "one in flight")
+
+        try hook(manager, session.id, ["hook_event_name": "UserPromptSubmit", "session_id": "c1", "prompt": "Fix it\nplease"])
+        XCTAssertTrue(wait { manager.messageReceipts.first?.status == "delivered" })
+        XCTAssertEqual(manager.list().first?.status, "running")
+        XCTAssertThrowsError(try manager.send(sessionId: session.id, messageId: "m3", text: "more"), "busy while running")
+
+        // Claude Code reports nothing for an interrupted turn; the interrupt itself ends it.
+        try manager.interrupt(sessionId: session.id)
+        XCTAssertEqual(manager.list().first?.status, "idle")
+        XCTAssertEqual(try manager.send(sessionId: session.id, messageId: "m3", text: "more").status, "written")
     }
 }

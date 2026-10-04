@@ -1,15 +1,16 @@
 import Foundation
 import AgentMasterCore
 
-/// One step of a conversation, read back from an agent's transcript so it can be summarized.
+/// One step of a conversation, read back from an agent's transcript to summarize it or show it as a chat.
 public enum TranscriptEntry: Equatable, Sendable {
     case user(String)
     case assistant(String)
-    case tool(name: String, input: String)
-    case toolResult(String)
+    /// `id` pairs the call with its result, which parallel calls do not report in order.
+    case tool(name: String, input: String, id: String? = nil)
+    case toolResult(String, id: String? = nil)
 }
 
-/// Reads each agent's transcript format. Only what a summary needs: prompts, replies, tool calls and results.
+/// Reads each agent's transcript format: prompts, replies, tool calls and results.
 public enum TranscriptParser {
     /// Claude Code: `~/.claude/projects/<project>/<id>.jsonl`, one message per line.
     public static func claude(_ data: Data) -> [TranscriptEntry] {
@@ -21,7 +22,7 @@ public enum TranscriptParser {
                 return (content.arrayValue ?? []).compactMap { block in
                     switch block["type"]?.stringValue {
                     case "text": return block["text"]?.stringValue.flatMap(prompt).map(TranscriptEntry.user)
-                    case "tool_result": return .toolResult(text(of: block["content"]))
+                    case "tool_result": return .toolResult(text(of: block["content"]), id: block["tool_use_id"]?.stringValue)
                     default: return nil
                     }
                 }
@@ -29,7 +30,9 @@ public enum TranscriptParser {
                 return (content.arrayValue ?? []).compactMap { block in
                     switch block["type"]?.stringValue {
                     case "text": return nonEmpty(block["text"]?.stringValue).map(TranscriptEntry.assistant)
-                    case "tool_use": return .tool(name: block["name"]?.stringValue ?? "tool", input: compact(block["input"]))
+                    case "tool_use":
+                        return .tool(name: block["name"]?.stringValue ?? "tool", input: compact(block["input"]),
+                                     id: block["id"]?.stringValue)
                     default: return nil
                     }
                 }
@@ -52,11 +55,13 @@ public enum TranscriptParser {
                 default: return nil   // developer: Codex's own instructions
                 }
             case "function_call":
-                return .tool(name: item["name"]?.stringValue ?? "tool", input: item["arguments"]?.stringValue ?? "")
+                return .tool(name: item["name"]?.stringValue ?? "tool", input: item["arguments"]?.stringValue ?? "",
+                             id: item["call_id"]?.stringValue)
             case "custom_tool_call":
-                return .tool(name: item["name"]?.stringValue ?? "tool", input: item["input"]?.stringValue ?? "")
+                return .tool(name: item["name"]?.stringValue ?? "tool", input: item["input"]?.stringValue ?? "",
+                             id: item["call_id"]?.stringValue)
             case "function_call_output", "custom_tool_call_output":
-                return .toolResult(text(of: item["output"]))
+                return .toolResult(text(of: item["output"]), id: item["call_id"]?.stringValue)
             default:
                 return nil
             }
@@ -76,12 +81,15 @@ public enum TranscriptParser {
                     switch block["kind"]?.stringValue {
                     case "text": return nonEmpty(block["data"]?.stringValue).map(TranscriptEntry.assistant)
                     case "toolUse":
-                        return .tool(name: block["data"]?["name"]?.stringValue ?? "tool", input: compact(block["data"]?["input"]))
+                        return .tool(name: block["data"]?["name"]?.stringValue ?? "tool", input: compact(block["data"]?["input"]),
+                                     id: block["data"]?["toolUseId"]?.stringValue)
                     default: return nil
                     }
                 }
             case "ToolResults":
-                return blocks.filter { $0["kind"]?.stringValue == "toolResult" }.map { .toolResult(text(of: $0["data"]?["content"])) }
+                return blocks.filter { $0["kind"]?.stringValue == "toolResult" }.map {
+                    .toolResult(text(of: $0["data"]?["content"]), id: $0["data"]?["toolUseId"]?.stringValue)
+                }
             default:
                 return []
             }
@@ -149,8 +157,8 @@ public enum SessionSummary {
             switch entry {
             case .user(let text): return "USER: " + truncated(text, messageLimit)
             case .assistant(let text): return "AGENT: " + truncated(text, messageLimit)
-            case let .tool(name, input): return "TOOL \(name): " + truncated(input, toolInputLimit)
-            case .toolResult(let text): return "RESULT: " + truncated(text, toolResultLimit)
+            case let .tool(name, input, _): return "TOOL \(name): " + truncated(input, toolInputLimit)
+            case let .toolResult(text, _): return "RESULT: " + truncated(text, toolResultLimit)
             }
         }.joined(separator: "\n\n")
         guard text.count > conversationLimit else { return text }

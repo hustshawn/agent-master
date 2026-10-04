@@ -26,6 +26,9 @@ public protocol AgentKind: Sendable {
     func resumeId(from state: SessionState) -> String?
     /// The conversation in the transcript the hooks reported, for a summary; empty if unreadable.
     func transcript(at path: String) -> [TranscriptEntry]
+    /// The hook output that carries `decision` for the request `payload`, or nil when this agent's requests
+    /// are answered in its terminal only (or `decision` does not fit the request).
+    func hookOutput(for payload: JSONValue, decision: RemoteDecision) -> String?
 
     /// Whether to inject AgentMaster's hooks into this launch.
     func hooksEnabled(preferences: AgentPreferences) -> Bool
@@ -50,6 +53,7 @@ extension AgentKind {
     public func hookArguments(for plan: HookPlan) throws -> [String] { [] }
     public func hookEnvironment(for plan: HookPlan) -> [String: String] { [:] }
     public func transcript(at path: String) -> [TranscriptEntry] { [] }
+    public func hookOutput(for payload: JSONValue, decision: RemoteDecision) -> String? { nil }
 
     /// Resume the conversation the hooks reported, as long as its transcript is still on disk.
     public func resumeId(from state: SessionState) -> String? {

@@ -110,6 +110,49 @@ final class ClaudeCodeAgentTests: XCTestCase {
         XCTAssertTrue(agent.supportsResume)
     }
 
+    // MARK: remote decisions
+
+    private func output(_ payload: JSONValue, _ decision: RemoteDecision) throws -> JSONValue? {
+        try ClaudeCodeAgent().hookOutput(for: payload, decision: decision).map { try JSONValue.parse(Data($0.utf8)) }
+    }
+
+    private let permission: JSONValue = ["hook_event_name": "PermissionRequest", "tool_name": "Bash",
+                                         "tool_input": ["command": "rm -rf build"]]
+    private let question: JSONValue = [
+        "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion",
+        "tool_input": ["questions": [["question": "Which API?", "header": "API", "multiSelect": false,
+                                      "options": [["label": "New"], ["label": "Both"]]]]],
+    ]
+
+    func testAnApprovalAllowsOrDenies() throws {
+        XCTAssertEqual(try output(permission, .allow),
+                       ["hookSpecificOutput": ["hookEventName": "PermissionRequest", "decision": ["behavior": "allow"]]])
+        XCTAssertEqual(try output(permission, .deny(message: "Not now", interrupt: true)),
+                       ["hookSpecificOutput": ["hookEventName": "PermissionRequest",
+                                               "decision": ["behavior": "deny", "message": "Not now", "interrupt": true]]])
+    }
+
+    func testAQuestionIsAnsweredByEchoingItsQuestionsWithAnswers() throws {
+        XCTAssertEqual(try output(question, .answer(["Which API?": "New"])),
+                       ["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                               "updatedInput": ["questions": question["tool_input"]!["questions"]!,
+                                                                "answers": ["Which API?": "New"]]]])
+        XCTAssertEqual(try output(question, .deny(message: "Away", interrupt: true)),
+                       ["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                               "permissionDecisionReason": "Away"]])
+    }
+
+    func testADecisionThatDoesNotFitTheRequestIsNotSent() throws {
+        XCTAssertNil(try output(permission, .answer(["Which API?": "New"])))
+        XCTAssertNil(try output(question, .allow), "allow alone does not answer a question")
+        XCTAssertNil(try output(["hook_event_name": "PreToolUse", "tool_name": "Bash"], .allow))
+    }
+
+    func testOtherAgentsAnswerInTheirTerminal() {
+        XCTAssertNil(CodexAgent().hookOutput(for: permission, decision: .allow))
+        XCTAssertNil(KiroAgent().hookOutput(for: permission, decision: .allow))
+    }
+
     // MARK: launch
 
     func testLaunchWritesHookSettingsAndCleansTheEnvironment() throws {

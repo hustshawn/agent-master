@@ -29,80 +29,115 @@
   </div>
 
   <div id="app" class="app" hidden>
-    <aside class="sidebar">
-      <div class="sidebar-top">
-        <span class="brand">AgentMaster</span>
-        <button id="open-settings" class="icon-button" title="Settings">⚙︎</button>
-      </div>
-      <div id="groups" class="groups"></div>
-      <div id="mobile-sessions" class="mobile-sessions"></div>
-      <div id="connection" class="connection" hidden>Reconnecting…</div>
-      <button id="new-session" class="new-session">＋ New session</button>
-    </aside>
+    <aside id="list-pane" class="list-pane"></aside>
 
-    <main class="main">
-      <header id="header" class="header">
-        <div class="crumbs">
-          <button id="mobile-back" class="icon-button mobile-only" title="Back" hidden>‹</button>
-          <span class="dim">AgentMaster</span><span id="crumb-project"></span><span id="crumb-session"></span>
-        </div>
-        <div class="header-right">
-          <div id="view-toggle" class="view-toggle" hidden>
-            <button data-view="chat" class="selected">Chat</button>
-            <button data-view="terminal">Terminal</button>
+    <section id="detail-pane" class="detail-pane" hidden>
+      <header id="detail-topbar" class="detail-topbar">
+        <button id="back-to-list" class="back-button mobile-only" type="button" title="Back">
+          <svg data-icon="arrow-left"></svg><span>Sessions</span>
+        </button>
+        <div class="session-toolbar">
+          <div id="view-toggle" class="mode-switch" role="group" aria-label="Session view">
+            <button type="button" data-view="chat" class="active" aria-pressed="true">Chat</button>
+            <button type="button" data-view="terminal" aria-pressed="false">Terminal</button>
           </div>
-          <span id="usage" class="usage"></span>
-          <button id="toggle-inspector" class="icon-button" title="Toggle inspector (Alt+0)">▤</button>
+          <div id="session-telemetry" class="session-telemetry"></div>
+        </div>
+        <div class="session-menu-wrap">
+          <button id="session-menu-button" class="icon-button" type="button" title="More">
+            <svg data-icon="dots"></svg>
+          </button>
+          <div id="session-menu" class="session-menu" hidden>
+            <button id="menu-rename" type="button">Rename</button>
+            <button id="menu-close" type="button" class="danger">Close session</button>
+          </div>
         </div>
       </header>
-      <div id="attention" class="attention" hidden></div>
-      <details id="mobile-changes" class="mobile-changes">
-        <summary>Changes <span id="mobile-changes-count" class="count"></span></summary>
-        <div id="mobile-changes-body" class="mobile-changes-body"></div>
-      </details>
+
+      <section id="detail-summary" class="detail-summary"></section>
+
       <div id="chat-pane" class="chat-pane" hidden>
-        <div id="chat-scroll" class="chat-scroll">
-          <div id="chat-messages" class="chat-messages"></div>
-          <div id="chat-requests" class="chat-requests"></div>
+        <div id="chat-scroll" class="detail-scroll">
+          <div id="decision-area"></div>
+          <div id="normal-area" hidden>
+            <nav id="detail-tabs" class="detail-tabs">
+              <button type="button" data-tab="conversation" class="active" aria-pressed="true">Conversation</button>
+              <button type="button" data-tab="changes" aria-pressed="false">Changes<span id="changes-count"></span></button>
+            </nav>
+            <div id="tab-conversation">
+              <div id="resolved-requests" class="resolved-requests"></div>
+              <div id="chat-messages" class="chat-messages"></div>
+            </div>
+            <div id="tab-changes" hidden></div>
+          </div>
         </div>
-        <form id="composer" class="chat-composer">
-          <div id="composer-hint" class="composer-hint" hidden></div>
+        <footer id="decision-footer" class="decision-footer" hidden></footer>
+        <form id="composer" class="composer">
           <div id="composer-status" class="composer-status"></div>
-          <div class="composer-row">
-            <textarea id="composer-text" placeholder="Message…" rows="1"></textarea>
-            <button id="composer-send" type="submit" class="primary">Send</button>
+          <div id="composer-attachments" class="composer-attachments" hidden></div>
+          <div class="composer-field">
+            <button id="composer-attach" class="attach-button" type="button" title="Add an attachment" aria-label="Add an attachment"
+                    aria-haspopup="menu" aria-expanded="false"><svg data-icon="plus"></svg></button>
+            <textarea id="composer-text" rows="1" placeholder="Add to this session…"></textarea>
+            <button id="composer-send" type="submit" title="Send"><svg data-icon="arrow-up"></svg></button>
           </div>
         </form>
       </div>
-      <div id="terminals" class="terminals">
-        <div id="empty" class="empty">
-          <p class="dim">No session</p>
-          <button id="empty-new" class="link">New Session…</button>
+
+      <div id="terminal-pane" class="terminal-pane" hidden>
+        <div id="terminals" class="terminals">
+          <div id="terminal-empty" class="terminal-empty">No session</div>
+        </div>
+        <div id="terminal-inputbar" class="terminal-inputbar">
+          <form id="terminal-send-form" class="terminal-send-form">
+            <button id="terminal-attach" class="attach-button" type="button" title="Add an attachment" aria-label="Add an attachment"
+                    aria-haspopup="menu" aria-expanded="false"><svg data-icon="plus"></svg></button>
+            <input id="terminal-send-input" autocomplete="off" spellcheck="false" placeholder="Add to this session…">
+            <button type="submit" title="Send"><svg data-icon="arrow-up"></svg></button>
+          </form>
+          <div class="terminal-keys">
+            <button type="button" data-key="esc">Esc</button>
+            <button type="button" data-key="up">↑</button>
+            <button type="button" data-key="down">↓</button>
+            <button type="button" data-key="tab">Tab</button>
+            <button type="button" data-key="enter">Enter</button>
+          </div>
         </div>
       </div>
-    </main>
+    </section>
 
-    <aside id="inspector" class="inspector">
-      <section class="panel" data-panel="todos"><h2>TODO <span class="count"></span></h2><div class="panel-body"></div></section>
-      <section class="panel" data-panel="agents"><h2>AGENTS <span class="count"></span></h2><div class="panel-body"></div></section>
-      <section class="panel" data-panel="changes"><h2>CHANGES <span class="count"></span></h2><div class="panel-body"></div></section>
-    </aside>
+    <section id="settings-pane" class="settings-pane" hidden>
+      <header class="settings-topbar">
+        <button id="settings-back" class="back-button" type="button">
+          <svg data-icon="arrow-left"></svg><span id="settings-back-label">Back</span>
+        </button>
+        <span id="settings-save-state" class="settings-save-state" hidden></span>
+      </header>
+      <div class="settings-body">
+        <nav id="settings-sidebar" class="settings-sidebar"></nav>
+        <div class="settings-detail">
+          <div id="settings-detail-scroll" class="settings-detail-scroll"></div>
+          <footer id="settings-scope" class="settings-scope" hidden></footer>
+        </div>
+      </div>
+    </section>
   </div>
 
   <dialog id="new-dialog" class="dialog">
-    <form method="dialog" id="new-form" class="new-form">
-      <h1>New Session</h1>
+    <form id="new-form" class="new-form">
+      <div class="dialog-heading"><h1>New Session</h1>
+        <button type="button" id="close-new" class="icon-button" aria-label="Cancel"><svg data-icon="x"></svg></button></div>
       <div class="field">
-        <label>AGENT</label>
+        <label>Agent</label>
         <div id="new-agents" class="agent-cards"></div>
       </div>
       <div class="field">
-        <label for="new-model">MODEL</label>
+        <label for="new-model">Model</label>
         <select id="new-model"></select>
         <input id="new-model-custom" type="text" placeholder="Model id" hidden>
       </div>
       <div class="field">
-        <label for="new-project">PROJECT</label>
+        <label for="new-project">Project</label>
         <div class="row">
           <input id="new-project" type="text" list="new-recents" placeholder="/path/on/the/server" spellcheck="false">
           <datalist id="new-recents"></datalist>
@@ -129,13 +164,9 @@
     </div>
   </dialog>
 
-  <dialog id="settings-dialog" class="dialog settings-dialog">
-    <div class="settings">
-      <nav id="settings-nav" class="settings-nav"></nav>
-      <div id="settings-page" class="settings-page"></div>
-      <button id="settings-close" class="icon-button settings-close" title="Close">✕</button>
-    </div>
-  </dialog>
+  <!-- The "+" menu, moved next to whichever input opened it; its items come from ATTACH_KINDS in app.js. -->
+  <div id="attach-menu" class="attach-menu" role="menu" hidden></div>
+  <input id="attach-input" type="file" hidden>
 
   <script src="vendor/xterm.js"></script>
   <script src="vendor/addon-fit.js"></script>

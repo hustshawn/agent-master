@@ -17,6 +17,8 @@ public struct ClaudeCodeAgent: AgentKind {
     public let executable = ExecutableSpec(name: "claude", overrideVariable: "AGENTMASTER_CLAUDE_PATH", excluding: ["cmux.app"])
     public let glyph = AgentGlyphStyle.spark(hex: "#D97757")
     public var supportsResume: Bool { true }
+    /// The per-session settings set AgentMaster's status line command.
+    public var reportsUsage: Bool { true }
 
     public init() {}
 
@@ -73,7 +75,9 @@ public struct ClaudeCodeAgent: AgentKind {
 
     public func hookArguments(for plan: HookPlan) throws -> [String] {
         let settings = try plan.writeSessionFile(SessionSettingsBuilder(hookExecutable: plan.hookExecutable).data())
-        return ["--settings", settings.path]
+        // Files the user attaches from a browser are saved in the session's folder, outside the project; without
+        // this, reading each one would ask for permission first.
+        return ["--settings", settings.path, "--add-dir", plan.paths.sessionDirectory(plan.sessionId).path]
     }
 
     public func arguments(preferences: AgentPreferences, hookArguments: [String], resumeId: String?) -> [String] {

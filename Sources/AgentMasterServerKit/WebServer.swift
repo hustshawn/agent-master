@@ -16,8 +16,10 @@ import AgentMasterBridge
 ///     PATCH  /api/sessions/{id}                        {"name": "..."}
 ///     DELETE /api/sessions/{id}
 ///     POST   /api/sessions/{id}/images                 an image as the body (Content-Type image/*): {"path"}
+///     POST   /api/sessions/{id}/files?name=            any file as the body, kept with the session: {"path"}
 ///     GET    /api/sessions/{id}/chat?after=            the conversation as ChatJSON; replace from `start`
 ///     POST   /api/sessions/{id}/messages              {"id", "text"}: types a prompt; MessageReceiptJSON (409 if busy)
+///     PUT    /api/sessions/{id}/reviewed               {"reviewed": bool}: marks the last turn's result reviewed
 ///     POST   /api/sessions/{id}/interrupt              stops the current turn (Esc)
 ///     GET    /api/requests                             open and recently resolved approvals and questions
 ///     POST   /api/requests/{id}                        {"behavior": "allow"|"deny", "message"?} or {"answers": {question: label}};
@@ -93,6 +95,19 @@ public enum WebServer {
                                                           data: Data(body.readableBytesView), contentType: contentType))
             }
         }
+        api.post("sessions/:id/files") { request, context -> ImageResponse in
+            let body: ByteBuffer
+            do {
+                body = try await request.body.collect(upTo: maxFileBytes)
+            } catch is NIOTooManyBytesError {
+                throw HTTPError(.contentTooLarge, message: "Files can be at most \(maxFileBytes / 1024 / 1024) MB.")
+            }
+            return try mapErrors {
+                ImageResponse(path: try manager.saveFile(sessionId: context.parameters.require("id"),
+                                                         data: Data(body.readableBytesView),
+                                                         filename: request.uri.queryParameters.get("name") ?? "file"))
+            }
+        }
         api.delete("sessions/:id") { _, context -> HTTPResponse.Status in
             try mapErrors { try manager.close(id: context.parameters.require("id")) }
             return .noContent
@@ -106,6 +121,11 @@ public enum WebServer {
             return try mapErrors {
                 try manager.send(sessionId: context.parameters.require("id"), messageId: body.id, text: body.text)
             }
+        }
+        api.put("sessions/:id/reviewed") { request, context -> HTTPResponse.Status in
+            let body = try await request.decode(as: ReviewedRequest.self, context: context)
+            try mapErrors { try manager.setReviewed(id: context.parameters.require("id"), body.reviewed) }
+            return .noContent
         }
         api.post("sessions/:id/interrupt") { _, context -> HTTPResponse.Status in
             try mapErrors { try manager.interrupt(sessionId: context.parameters.require("id")) }
@@ -192,6 +212,7 @@ public enum WebServer {
     }
 
     static let maxImageBytes = 20 * 1024 * 1024
+    static let maxFileBytes = 50 * 1024 * 1024
 
     static func json<T: Encodable>(_ value: T) throws -> String {
         String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
@@ -330,6 +351,10 @@ struct CreateSessionRequest: Decodable {
 
 struct RenameRequest: Decodable {
     let name: String
+}
+
+struct ReviewedRequest: Decodable {
+    let reviewed: Bool
 }
 
 struct MessageRequest: Decodable {

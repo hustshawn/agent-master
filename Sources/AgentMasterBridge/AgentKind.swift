@@ -15,6 +15,8 @@ public protocol AgentKind: Sendable {
     /// A menu shortcut that starts this agent without the new-session panel.
     var shortcut: AgentShortcut? { get }
     var supportsResume: Bool { get }
+    /// Whether it reports usage (model, context, cost) through AgentMaster's status line.
+    var reportsUsage: Bool { get }
     /// Maps this agent's hook payloads onto the Claude Code shape HookTranslator reads.
     var hookDialect: any HookDialect { get }
 
@@ -47,6 +49,7 @@ public protocol AgentKind: Sendable {
 extension AgentKind {
     public var shortcut: AgentShortcut? { nil }
     public var supportsResume: Bool { false }
+    public var reportsUsage: Bool { false }
     public var hookDialect: any HookDialect { ClaudeHookDialect() }
     public func isForcedOn(optionId: String, preferences: AgentPreferences) -> Bool { false }
     public func hooksEnabled(preferences: AgentPreferences) -> Bool { false }

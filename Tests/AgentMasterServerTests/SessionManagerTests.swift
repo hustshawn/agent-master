@@ -315,6 +315,54 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertEqual(pushes.urgencies.count, 3, "closing a session is not news")
     }
 
+    func testAReviewedMarkLastsUntilTheNextPromptAndAcrossARestart() throws {
+        let first = try makeManager()
+        let session = try first.create(projectPath: project)
+        try hook(first, session.id, ["hook_event_name": "SessionStart", "session_id": "c1", "cwd": .string(project),
+                                     "transcript_path": .string(project + "/c1.jsonl")])
+        FileManager.default.createFile(atPath: project + "/c1.jsonl", contents: Data())
+        XCTAssertTrue(wait { first.list().first?.status == "idle" })
+        let before = try XCTUnwrap(first.list().first?.lastActivityAt)
+        XCTAssertEqual(first.list().first?.hasConversation, false, "started, but nothing asked yet")
+        XCTAssertEqual(first.agents().first { $0.id == "claude" }?.reportsUsage, true)
+        XCTAssertEqual(first.agents().first { $0.id == "kiro" }?.reportsUsage, false)
+        try first.setReviewed(id: session.id, true)
+        XCTAssertEqual(first.list().first?.reviewed, true)
+
+        first.shutdown()
+        managers.removeAll()
+        let second = try makeManager()
+        second.restoreOpenSessions()
+        XCTAssertTrue(wait { second.list().first?.reviewed == true }, "the mark is in the journal")
+
+        let restored = try XCTUnwrap(second.list().first)
+        XCTAssertTrue(restored.hasConversation, "a resumed session carries its conversation")
+        try hook(second, restored.id, ["hook_event_name": "UserPromptSubmit", "session_id": "c1", "prompt": "more"])
+        XCTAssertTrue(wait { second.list().first?.reviewed == false }, "a new turn is not reviewed yet")
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(second.list().first?.lastActivityAt), before)
+        XCTAssertThrowsError(try second.setReviewed(id: "nope", true))
+    }
+
+    func testAMessageWithAnImageIsConfirmedByThePromptClaudeReportsForIt() throws {
+        XCTAssertEqual(MessageStore.withoutImagePaths("What color?\n\n/data/sessions/S/images/ab12.png /x/y.JPG"), "What color?")
+        XCTAssertEqual(MessageStore.withoutImagePaths("/data/sessions/S/images/ab12.webp"), "")
+        XCTAssertEqual(MessageStore.withoutImagePaths("see /etc/hosts and a.png"), "see /etc/hosts and a.png", "only absolute image paths")
+
+        let store = MessageStore()
+        let typed = Output()
+        _ = try store.send(id: "m1", sessionId: "s1", text: "What color?\n\n/d/images/ab12.png", idle: true) { typed.append($0) }
+        XCTAssertTrue(wait(2) { typed.text.hasSuffix("\u{1B}[201~\r") }, "Enter follows the paste on its own")
+        // Claude Code reports the image as a placeholder instead of its path.
+        store.promptSubmitted(sessionId: "s1", prompt: "[Image #1]What color?")
+        XCTAssertEqual(store.all.first?.status, "delivered")
+        // With a document as well, it keeps that path but folds the blank lines around the image's.
+        _ = try store.send(id: "m2", sessionId: "s2", text: "Read both.\n\n/d/images/a.png /d/files/x-notes.txt", idle: true) { _ in }
+        store.promptSubmitted(sessionId: "s2", prompt: "[Image #2]Read both.\n/d/files/x-notes.txt")
+        XCTAssertEqual(store.all.first { $0.id == "m2" }?.status, "delivered")
+        Thread.sleep(forTimeInterval: MessageStore.enterDelays[1] + 0.3)
+        XCTAssertEqual(typed.text.filter { $0 == "\r" }.count, 1, "no extra Enter once the prompt arrived")
+    }
+
     func testAMessageIsTypedOnceAndConfirmedByThePrompt() throws {
         let manager = try makeManager()
         let session = try manager.create(projectPath: project)

@@ -164,7 +164,9 @@ final class ClaudeCodeAgentTests: XCTestCase {
             paths: paths, resumeId: "abc"))
         let settings = install.root.appendingPathComponent("Support/sessions/S1/settings.json").path
         XCTAssertEqual(launch.executable, claude)
-        XCTAssertEqual(launch.args, ["--settings", settings, "--model", "opus", "--resume", "abc"])
+        let sessionFolder = install.root.appendingPathComponent("Support/sessions/S1").path
+        XCTAssertEqual(launch.args, ["--settings", settings, "--add-dir", sessionFolder, "--model", "opus", "--resume", "abc"],
+                       "the session's folder, where attachments are saved, is readable without asking")
         XCTAssertTrue(FileManager.default.fileExists(atPath: settings))
         XCTAssertEqual(launch.environment["AGENTMASTER_SESSION_ID"], "S1")
         XCTAssertEqual(launch.environment["AGENTMASTER_SOCKET"], paths.socketPath)

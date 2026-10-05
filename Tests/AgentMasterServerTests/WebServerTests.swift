@@ -109,6 +109,32 @@ final class WebServerTests: XCTestCase {
         }
     }
 
+    func testAnyFileCanBeUploadedUnderASafeVersionOfItsName() async throws {
+        let project = SessionManager.realPath(root.appendingPathComponent("project").path)
+        let session = try manager.create(projectPath: project, agentId: "claude")
+        try await app().test(.router) { client in
+            let path = try await client.execute(uri: "/api/sessions/\(session.id)/files?name=crash%20log%20(1).txt", method: .post,
+                                                headers: [.authorization: "Bearer secret", .contentType: "text/plain"],
+                                                body: ByteBuffer(string: "boom")) {
+                XCTAssertEqual($0.status, .ok)
+                return try JSONDecoder().decode([String: String].self, from: Data(buffer: $0.body))["path"] ?? ""
+            }
+            XCTAssertTrue(path.hasSuffix("-crash-log--1-.txt"), path)
+            XCTAssertFalse(path.contains(" "), "one word in the prompt")
+            XCTAssertEqual(FileManager.default.contents(atPath: path), Data("boom".utf8))
+            try await client.execute(uri: "/api/sessions/\(session.id)/files", method: .post,
+                                     headers: [.authorization: "Bearer secret"],
+                                     body: ByteBuffer(repeating: 0, count: WebServer.maxFileBytes + 1)) {
+                XCTAssertEqual($0.status, .contentTooLarge)
+            }
+            try manager.close(id: session.id)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+        }
+        XCTAssertEqual(SessionManager.safeFilename("../../etc/passwd"), "passwd")
+        XCTAssertEqual(SessionManager.safeFilename("截图 1.PNG"), "截图-1.PNG")
+        XCTAssertEqual(SessionManager.safeFilename(""), "file")
+    }
+
     func testAMissingFolderIsABadRequestWithAMessage() async throws {
         try await app().test(.router) { client in
             try await client.execute(uri: "/api/sessions", method: .post, headers: self.auth,

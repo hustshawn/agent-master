@@ -43,9 +43,15 @@ final class MessageStore: @unchecked Sendable {
         return receipts.values.sorted { $0.createdAt < $1.createdAt }
     }
 
+    /// After the paste, when to press Enter, and when to press it again if the agent has not reported the
+    /// prompt yet. Claude Code turns a pasted image path into an attachment and swallows an Enter that comes
+    /// while it reads the image; an extra Enter on an already empty input does nothing.
+    static let enterDelays: [TimeInterval] = [0.3, 2.5, 6]
+
     /// Writes `text` into the session as typed input, unless a send with the same `id` already happened.
     /// `idle` is whether the agent is waiting for a prompt; `write` types into its terminal.
-    func send(id: String, sessionId: String, text: String, idle: Bool, write: (Data) -> Void) throws -> MessageReceiptJSON {
+    func send(id: String, sessionId: String, text: String, idle: Bool,
+              write: @escaping @Sendable (Data) -> Void) throws -> MessageReceiptJSON {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw MessageError.empty }
         lock.lock()
@@ -65,7 +71,14 @@ final class MessageStore: @unchecked Sendable {
                                          createdAt: Date().timeIntervalSince1970, status: "written")
         receipts[id] = receipt
         lock.unlock()
-        write(Self.typed(trimmed))
+        write(Self.pasted(trimmed))
+        for (index, delay) in Self.enterDelays.enumerated() {
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+                // The first Enter always; the later ones only while the prompt still has not arrived.
+                guard index == 0 || self?.status(id) == "written" else { return }
+                write(Data("\r".utf8))
+            }
+        }
         DispatchQueue.global().asyncAfter(deadline: .now() + confirmTimeout) { [weak self] in
             self?.update(id, from: "written", to: "unconfirmed")
         }
@@ -76,9 +89,31 @@ final class MessageStore: @unchecked Sendable {
     /// The agent reported `prompt`: the session's in-flight message, if this is it, has arrived.
     func promptSubmitted(sessionId: String, prompt: String) {
         lock.lock()
-        let match = receipts.values.first { $0.sessionId == sessionId && $0.status == "written" && prompt.contains($0.text) }
+        // Spacing is not compared: with an image's path gone, Claude Code also folds the blank lines around it.
+        let reported = Self.withoutWhitespace(prompt)
+        let match = receipts.values.first {
+            $0.sessionId == sessionId && $0.status == "written"
+                && reported.contains(Self.withoutWhitespace(Self.withoutImagePaths($0.text)))
+        }
         lock.unlock()
         if let match { update(match.id, from: "written", to: "delivered") }
+    }
+
+    /// The text an agent reports back for a prompt: Claude Code replaces an image's path with "[Image #1]".
+    static func withoutImagePaths(_ text: String) -> String {
+        text.replacingOccurrences(of: #"(^|\s)/\S+\.(png|jpe?g|gif|webp)(?=\s|$)"#, with: "",
+                                  options: [.regularExpression, .caseInsensitive])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func withoutWhitespace(_ text: String) -> String {
+        text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.map(String.init).joined()
+    }
+
+    private func status(_ id: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return receipts[id]?.status
     }
 
     func removeAll(sessionId: String) {
@@ -87,9 +122,9 @@ final class MessageStore: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// A bracketed paste, so newlines stay in the prompt instead of submitting it, then Enter.
-    static func typed(_ text: String) -> Data {
-        Data("\u{1B}[200~\(text)\u{1B}[201~\r".utf8)
+    /// A bracketed paste, so newlines stay in the prompt instead of submitting it. Enter follows separately.
+    static func pasted(_ text: String) -> Data {
+        Data("\u{1B}[200~\(text)\u{1B}[201~".utf8)
     }
 
     private func update(_ id: String, from old: String, to new: String) {

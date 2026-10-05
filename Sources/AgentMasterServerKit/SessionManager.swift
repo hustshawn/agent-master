@@ -117,7 +117,7 @@ public final class SessionManager: @unchecked Sendable {
     /// Starts `agentId` (the default agent when nil) in `projectPath`. `model` overrides the default model once.
     @discardableResult
     public func create(projectPath rawPath: String, agentId: String? = nil, model: String? = nil,
-                       resumeId: String? = nil, title: String? = nil,
+                       resumeId: String? = nil, title: String? = nil, reviewed: Bool = false,
                        columns: UInt16 = 120, rows: UInt16 = 36) throws -> SessionJSON {
         // Agents report resolved paths (/tmp is /private/tmp on macOS); resolve here so file changes read relative.
         let projectPath = Self.realPath(Self.expandingTilde(rawPath))
@@ -149,7 +149,7 @@ public final class SessionManager: @unchecked Sendable {
             throw error
         }
         let session = ServerSession(id: id, agent: agent, projectPath: projectPath, resumeHint: resumeId,
-                                    customName: title, process: process)
+                                    customName: title, reviewed: reviewed, process: process)
         session.onChange = { [weak self, weak session] in
             guard let self, let session else { return }
             self.persist()
@@ -179,6 +179,12 @@ public final class SessionManager: @unchecked Sendable {
         session.customName = trimmed.isEmpty ? nil : trimmed
     }
 
+    /// Marks the last turn's result as reviewed (or not); the session's next prompt clears the mark.
+    public func setReviewed(id: String, _ reviewed: Bool) throws {
+        guard let session = session(id: id) else { throw SessionManagerError.unknownSession(id) }
+        session.reviewed = reviewed
+    }
+
     /// Saves an image pasted in the browser into the session's directory, which goes away with the session,
     /// and returns its path. Pasting that path into the agent attaches the image, like a local clipboard paste.
     public func saveImage(sessionId id: String, data: Data, contentType: String) throws -> String {
@@ -190,6 +196,27 @@ public final class SessionManager: @unchecked Sendable {
         let url = directory.appendingPathComponent("\(UUID().uuidString.prefix(8).lowercased()).\(ext)")
         try data.write(to: url)
         return url.path
+    }
+
+    /// Saves any file sent from the browser (a document, a log, a photo) into the session's directory, which
+    /// goes away with the session, and returns its path for the prompt. The name keeps its extension, so an
+    /// agent still recognizes an image, and loses spaces and anything but letters, digits, `.`, `_` and `-`,
+    /// so the path stays one word in the prompt.
+    public func saveFile(sessionId id: String, data: Data, filename: String) throws -> String {
+        guard session(id: id) != nil else { throw SessionManagerError.unknownSession(id) }
+        let directory = paths.sessionDirectory(id).appendingPathComponent("files")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("\(UUID().uuidString.prefix(8).lowercased())-\(Self.safeFilename(filename))")
+        try data.write(to: url)
+        return url.path
+    }
+
+    static func safeFilename(_ name: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        let base = (name as NSString).lastPathComponent
+        let safe = String(base.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" })
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
+        return safe.isEmpty ? "file" : String(safe.suffix(80))
     }
 
     public func close(id: String) throws {
@@ -260,7 +287,7 @@ public final class SessionManager: @unchecked Sendable {
         var restored = 0
         for record in plan {
             if (try? create(projectPath: record.projectPath, agentId: record.agentId, resumeId: record.resumeId,
-                            title: record.title)) != nil {
+                            title: record.title, reviewed: record.reviewed ?? false)) != nil {
                 restored += 1
             }
         }

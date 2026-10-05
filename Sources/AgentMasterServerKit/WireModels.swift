@@ -15,6 +15,12 @@ public struct SessionJSON: Codable, Equatable, Sendable {
     public let subtitle: String
     public let status: String
     public let createdAt: Double
+    /// When the agent last reported anything but usage.
+    public let lastActivityAt: Double
+    /// The user marked the last turn's result as reviewed.
+    public let reviewed: Bool
+    /// It has had a prompt, here or before a restore resumed it; an idle session without one has not started.
+    public let hasConversation: Bool
     public let state: StateJSON
 }
 
@@ -158,9 +164,12 @@ public struct AgentJSON: Codable, Sendable {
     /// Toggles the current preferences force on.
     public let forcedOn: [String]
     public let defaultModel: String?
+    /// Whether its sessions report usage at all, so the browser can tell "not yet" from "never".
+    public let reportsUsage: Bool
 
     init(_ agent: any AgentKind, environment: [String: String], preferences: AgentPreferences) {
         id = agent.id
+        reportsUsage = agent.reportsUsage
         name = agent.displayName
         switch agent.glyph {
         case .spark(let hex): glyph = Glyph(kind: "spark", value: hex)

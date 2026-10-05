@@ -19,9 +19,10 @@ public struct OpenSessionSnapshot {
     /// The id a restored session was launched with, until its own SessionStart reports one.
     public let fallbackResumeId: String?
     public let title: String?
+    public let reviewed: Bool?
 
     public init(agentId: String, projectPath: String, createdAt: Date, state: SessionState, selected: Bool,
-                fallbackResumeId: String?, title: String? = nil) {
+                fallbackResumeId: String?, title: String? = nil, reviewed: Bool? = nil) {
         self.agentId = agentId
         self.projectPath = projectPath
         self.createdAt = createdAt
@@ -29,6 +30,7 @@ public struct OpenSessionSnapshot {
         self.selected = selected
         self.fallbackResumeId = fallbackResumeId
         self.title = title
+        self.reviewed = reviewed
     }
 }
 
@@ -42,7 +44,7 @@ public enum RestorePlan {
             else { return nil }
             return OpenSessionRecord(agentId: snapshot.agentId, projectPath: snapshot.projectPath,
                                      createdAt: snapshot.createdAt, resumeId: resumeId, selected: snapshot.selected,
-                                     title: snapshot.title)
+                                     title: snapshot.title, reviewed: snapshot.reviewed)
         }
     }
 

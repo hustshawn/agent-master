@@ -17,6 +17,8 @@ public struct ClaudeCodeAgent: AgentKind {
     public let executable = ExecutableSpec(name: "claude", overrideVariable: "AGENTMASTER_CLAUDE_PATH", excluding: ["cmux.app"])
     public let glyph = AgentGlyphStyle.spark(hex: "#D97757")
     public var supportsResume: Bool { true }
+    /// The per-session settings set AgentMaster's status line command.
+    public var reportsUsage: Bool { true }
 
     public init() {}
 
@@ -46,11 +48,36 @@ public struct ClaudeCodeAgent: AgentKind {
         FileManager.default.contents(atPath: path).map(TranscriptParser.claude) ?? []
     }
 
+    /// PermissionRequest takes a `decision`; AskUserQuestion is answered from PreToolUse by echoing its
+    /// questions with an `answers` map (code.claude.com/docs/en/hooks#askuserquestion).
+    public func hookOutput(for payload: JSONValue, decision: RemoteDecision) -> String? {
+        let output: JSONValue
+        switch (payload["hook_event_name"]?.stringValue, decision) {
+        case ("PermissionRequest", .allow):
+            output = ["hookEventName": "PermissionRequest", "decision": ["behavior": "allow"]]
+        case let ("PermissionRequest", .deny(message, interrupt)):
+            output = ["hookEventName": "PermissionRequest",
+                      "decision": ["behavior": "deny", "message": .string(message), "interrupt": .bool(interrupt)]]
+        case let ("PreToolUse", .answer(answers)) where payload["tool_name"]?.stringValue == "AskUserQuestion":
+            output = ["hookEventName": "PreToolUse", "permissionDecision": "allow",
+                      "updatedInput": ["questions": payload["tool_input"]?["questions"] ?? .array([]),
+                                       "answers": .object(answers.mapValues(JSONValue.string))]]
+        case let ("PreToolUse", .deny(message, _)) where payload["tool_name"]?.stringValue == "AskUserQuestion":
+            output = ["hookEventName": "PreToolUse", "permissionDecision": "deny",
+                      "permissionDecisionReason": .string(message)]
+        default:
+            return nil
+        }
+        return (try? JSONValue.object(["hookSpecificOutput": output]).encoded()).map { String(decoding: $0, as: UTF8.self) }
+    }
+
     public func hooksEnabled(preferences: AgentPreferences) -> Bool { true }
 
     public func hookArguments(for plan: HookPlan) throws -> [String] {
         let settings = try plan.writeSessionFile(SessionSettingsBuilder(hookExecutable: plan.hookExecutable).data())
-        return ["--settings", settings.path]
+        // Files the user attaches from a browser are saved in the session's folder, outside the project; without
+        // this, reading each one would ask for permission first.
+        return ["--settings", settings.path, "--add-dir", plan.paths.sessionDirectory(plan.sessionId).path]
     }
 
     public func arguments(preferences: AgentPreferences, hookArguments: [String], resumeId: String?) -> [String] {

@@ -16,18 +16,37 @@ public final class ServerSession: @unchecked Sendable {
     private var translator: HookTranslator
     private var _state = SessionState()
     private var _customName: String?
+    /// The user marked the last turn's result as reviewed; the next prompt clears it.
+    private var _reviewed: Bool
+    /// When the agent last did something (not counting status-line usage updates).
+    private var lastActivityAt = Date()
     /// Called after any change a browser should see.
     var onChange: (@Sendable () -> Void)?
 
     init(id: String, agent: any AgentKind, projectPath: String, resumeHint: String?, customName: String?,
-         process: PTYProcess) {
+         reviewed: Bool = false, process: PTYProcess) {
         self.id = id
         self.agent = agent
         self.projectPath = projectPath
         self.resumeHint = resumeHint
         self.process = process
         _customName = customName
+        _reviewed = reviewed
         translator = HookTranslator(dialect: agent.hookDialect)
+    }
+
+    public var reviewed: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _reviewed
+        }
+        set {
+            lock.lock()
+            _reviewed = newValue
+            lock.unlock()
+            onChange?()
+        }
     }
 
     public var state: SessionState {
@@ -69,11 +88,17 @@ public final class ServerSession: @unchecked Sendable {
         apply([.sessionEnded(reason: "process_exit")])
     }
 
-    private func apply(_ events: [SessionEvent]) {
+    /// Also for what the server itself knows of, outside the agent's hooks (a request it timed out).
+    func apply(_ events: [SessionEvent]) {
         guard !events.isEmpty else { return }
         let now = Date()
         lock.lock()
-        for event in events { _state.apply(event, at: now) }
+        for event in events {
+            _state.apply(event, at: now)
+            if case .usageUpdated = event { continue }
+            lastActivityAt = now
+            if case .promptSubmitted = event { _reviewed = false }   // a new turn has nothing reviewed yet
+        }
         lock.unlock()
         onChange?()
     }
@@ -82,6 +107,8 @@ public final class ServerSession: @unchecked Sendable {
         lock.lock()
         let state = _state
         let customName = _customName
+        let reviewed = _reviewed
+        let lastActivityAt = self.lastActivityAt
         lock.unlock()
         let label = agent.id == AgentRegistry.defaultAgent.id ? nil : agent.displayName
         return SessionJSON(
@@ -89,13 +116,16 @@ public final class ServerSession: @unchecked Sendable {
             projectName: (projectPath as NSString).lastPathComponent,
             title: RowText.title(customName: customName, firstPrompt: state.firstPrompt), customName: customName,
             subtitle: RowText.subtitle(for: state, agentName: label), status: state.status.name,
-            createdAt: createdAt.timeIntervalSince1970, state: StateJSON(state))
+            createdAt: createdAt.timeIntervalSince1970, lastActivityAt: lastActivityAt.timeIntervalSince1970,
+            reviewed: reviewed,
+            hasConversation: state.firstPrompt != nil || state.lastMessage != nil || resumeHint != nil,
+            state: StateJSON(state))
     }
 
     var snapshot: OpenSessionSnapshot {
         let state = self.state
         return OpenSessionSnapshot(agentId: agent.id, projectPath: projectPath, createdAt: createdAt, state: state,
                                    selected: false, fallbackResumeId: resumeHint,
-                                   title: customName ?? state.firstPrompt)
+                                   title: customName ?? state.firstPrompt, reviewed: reviewed ? true : nil)
     }
 }

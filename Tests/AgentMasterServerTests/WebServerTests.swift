@@ -109,6 +109,62 @@ final class WebServerTests: XCTestCase {
         }
     }
 
+    func testAnyFileCanBeUploadedUnderASafeVersionOfItsName() async throws {
+        let project = SessionManager.realPath(root.appendingPathComponent("project").path)
+        let session = try manager.create(projectPath: project, agentId: "claude")
+        let other = try manager.create(projectPath: project, agentId: "claude")
+        try await app().test(.router) { client in
+            let attachment = try await client.execute(uri: "/api/sessions/\(session.id)/files?name=crash%20log%20(1).txt",
+                                                      method: .post,
+                                                      headers: [.authorization: "Bearer secret", .contentType: "text/plain"],
+                                                      body: ByteBuffer(string: "boom")) {
+                XCTAssertEqual($0.status, .ok)
+                return try JSONDecoder().decode(AttachmentJSON.self, from: Data(buffer: $0.body))
+            }
+            XCTAssertEqual(attachment.name, "crash log (1).txt", "shown as the device named it")
+            XCTAssertEqual(attachment.type, "text/plain")
+            XCTAssertEqual(attachment.size, 4)
+            XCTAssertTrue(attachment.path.hasSuffix("-crash-log--1-.txt"), attachment.path)
+            XCTAssertFalse(attachment.path.contains(" "), "one word in the prompt")
+            XCTAssertEqual(FileManager.default.contents(atPath: attachment.path), Data("boom".utf8))
+
+            // Served back to preview: plain text inline, never runnable, and only in its own session.
+            try await client.execute(uri: attachment.url + "?token=secret", method: .get) {
+                XCTAssertEqual($0.status, .ok)
+                XCTAssertEqual(String(buffer: $0.body), "boom")
+                XCTAssertEqual($0.headers[.contentType], "text/plain")
+                XCTAssertEqual($0.headers[.contentSecurityPolicy], "sandbox")
+                XCTAssertTrue($0.headers[.contentDisposition]?.hasPrefix("inline") == true)
+            }
+            try await client.execute(uri: "/api/sessions/\(other.id)/files/\(attachment.id)", method: .get, headers: self.auth) {
+                XCTAssertEqual($0.status, .badRequest, "another session's attachment is not found")
+            }
+            let page = try await client.execute(uri: "/api/sessions/\(session.id)/files?name=x.html", method: .post,
+                                                headers: [.authorization: "Bearer secret", .contentType: "text/html"],
+                                                body: ByteBuffer(string: "<script>alert(1)</script>")) {
+                try JSONDecoder().decode(AttachmentJSON.self, from: Data(buffer: $0.body))
+            }
+            try await client.execute(uri: page.url, method: .get, headers: self.auth) {
+                XCTAssertEqual($0.headers[.contentType], "application/octet-stream", "an HTML upload is downloaded, not run")
+                XCTAssertTrue($0.headers[.contentDisposition]?.hasPrefix("attachment") == true)
+            }
+
+            try await client.execute(uri: "/api/uploads/limits", method: .get, headers: self.auth) {
+                XCTAssertEqual(try JSONDecoder().decode(UploadLimitsJSON.self, from: Data(buffer: $0.body)), .current)
+            }
+            try await client.execute(uri: "/api/sessions/\(session.id)/files", method: .post,
+                                     headers: [.authorization: "Bearer secret"],
+                                     body: ByteBuffer(repeating: 0, count: UploadLimitsJSON.current.maxFileBytes + 1)) {
+                XCTAssertEqual($0.status, .contentTooLarge)
+            }
+            try manager.close(id: session.id)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: attachment.path))
+        }
+        XCTAssertEqual(SessionManager.safeFilename("../../etc/passwd"), "passwd")
+        XCTAssertEqual(SessionManager.safeFilename("截图 1.PNG"), "截图-1.PNG")
+        XCTAssertEqual(SessionManager.safeFilename(""), "file")
+    }
+
     func testAMissingFolderIsABadRequestWithAMessage() async throws {
         try await app().test(.router) { client in
             try await client.execute(uri: "/api/sessions", method: .post, headers: self.auth,

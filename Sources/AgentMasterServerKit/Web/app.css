@@ -264,7 +264,10 @@ svg { display: block; flex: none; }
 .msg-user { align-items: flex-end; }
 .msg-assistant { align-items: flex-start; }
 .agent-line { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin: 2px 0 5px 2px; }
-.bubble { max-width: 72ch; padding: 8px 12px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
+/* Never wider than the chat column: on a phone 72ch is wider than the screen, and one long path, URL or
+   inline code span would otherwise stretch the whole bubble and make every line scroll sideways. */
+.bubble { max-width: min(72ch, 100%); min-width: 0; padding: 8px 12px; border-radius: 12px; white-space: pre-wrap;
+  overflow-wrap: anywhere; }
 .msg-user .bubble { background: var(--accent); color: #0a203d; }
 .msg-assistant .bubble { background: var(--raised); border: 1px solid var(--line); }
 .bubble.markdown { white-space: normal; }
@@ -276,7 +279,12 @@ svg { display: block; flex: none; }
 .bubble.markdown h3 { font-size: 1.05em; }
 .bubble.markdown p, .bubble.markdown ul, .bubble.markdown ol, .bubble.markdown blockquote { margin: 0.5em 0; }
 .bubble.markdown ul, .bubble.markdown ol { padding-left: 1.4em; }
-.bubble.markdown pre { background: rgba(0, 0, 0, 0.25); padding: 8px; border-radius: 8px; overflow-x: auto; }
+.bubble.markdown pre { background: rgba(0, 0, 0, 0.25); padding: 8px; border-radius: 8px; overflow-x: auto; max-width: 100%; }
+.bubble.markdown pre code { overflow-wrap: normal; }
+/* A wide table scrolls on its own; the text around it keeps the bubble's width. */
+.bubble.markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.bubble.markdown th, .bubble.markdown td { padding: 4px 8px; border: 1px solid var(--line); text-align: left; vertical-align: top;
+  overflow-wrap: anywhere; min-width: 6em; max-width: 22em; }
 .bubble.markdown code { font-family: var(--mono); font-size: 0.92em; }
 .bubble.markdown a { color: var(--accent); }
 
@@ -561,6 +569,9 @@ dialog.attach-sheet { padding: 0; }
 /* MARK: mobile layout — list / detail / settings become full-screen pages. */
 @media (max-width: 700px) {
   .app { position: fixed; inset: 0; height: auto; }
+  /* On a phone a code block wraps too: reading it by scrolling sideways line by line is worse. */
+  .bubble.markdown pre { white-space: pre-wrap; }
+  .bubble.markdown pre code { overflow-wrap: anywhere; }
   /* The sidebar is a left drawer here, closed by default (see setSidebarOpen()/updateSidebarChrome() in
      app.js): taken out of the flex flow and pinned instead, so a closed list-pane needs no flex-basis
      bookkeeping the way the desktop collapse does — it just slides off-screen. */

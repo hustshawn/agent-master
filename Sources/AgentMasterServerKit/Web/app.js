@@ -309,6 +309,7 @@ function selectInternal(id) {
   detailTab = "conversation";
   state.renamingSelected = null;
   $("session-menu").hidden = true;
+  if (id) state.chatStuck.set(id, true);   // entering a session shows its latest messages, however long it is
   if (id) fetchChat(id);
   render();
   if (isMobile()) setSidebarOpen(false);
@@ -828,6 +829,14 @@ $("chat-scroll").addEventListener("scroll", () => {
   const scroll = $("chat-scroll");
   state.chatStuck.set(state.selectedId, scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40);
 });
+
+/// While the reader is at the bottom, the bottom stays in view however the conversation grows: its history
+/// arriving after the session opened, a new message, an image finishing loading. Scrolling up stops this.
+new ResizeObserver(() => {
+  const scroll = $("chat-scroll");
+  if (detailTab !== "conversation" || $("normal-area").hidden) return;
+  if (state.chatStuck.get(state.selectedId) ?? true) scroll.scrollTop = scroll.scrollHeight;
+}).observe($("chat-messages"));
 
 $("detail-tabs").querySelectorAll("button").forEach((button) => {
   button.onclick = () => { detailTab = button.dataset.tab; renderDetailTabs(); };

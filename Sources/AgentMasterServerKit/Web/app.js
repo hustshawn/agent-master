@@ -46,6 +46,7 @@ const ICON_SOURCE = {
   dots: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /><path d="M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /><path d="M19 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /></svg>',
   "shield-check": '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.46 20.846a12 12 0 0 1 -7.96 -14.846a12 12 0 0 0 8.5 -3a12 12 0 0 0 8.5 3a12 12 0 0 1 -.09 7.06" /><path d="M15 19l2 2l4 -4" /></svg>',
   refresh: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" /></svg>',
+  "layout-sidebar": '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z" /><path d="M9 4l0 16" /></svg>',
 };
 const iconTemplates = new Map();
 function icon(name, size) {
@@ -68,7 +69,9 @@ document.querySelectorAll("[data-icon]").forEach((node) => node.replaceWith(icon
 const state = {
   token: null,
   sessions: new Map(),        // id -> SessionJSON
-  selectedId: localStorage.getItem("am.selected"),
+  // No initial selection: a valid #session=<id> URL (parsed once the first snapshot arrives, in
+  // applyLocationSelection()) or a user click chooses one; otherwise the home pane shows (see render()).
+  selectedId: null,
   agents: [],                 // AgentJSON[]
   restoreSessionsOnLaunch: true,
   home: "/",
@@ -77,8 +80,9 @@ const state = {
   lastUpdate: null,
   socketOpen: false,           // the /api/events stream is connected
   online: false,               // socketOpen and the browser has a network (see updateOnline)
-  hashSelectionApplied: false,
-  page: "list",                // "list" or "detail", at narrow widths
+  snapshotLoaded: false,        // the first "snapshot" event has arrived — before this, home shows a loading state
+  sidebarCollapsed: localStorage.getItem("am.sidebarCollapsed") === "true",   // desktop preference, per device
+  sidebarOpenMobile: false,      // the phone drawer; independent of the desktop preference, closed by default
   filter: "all",                // "all" | "needsAttention" | "running" | "review"
   requests: new Map(),        // id -> ActionRequestJSON
   messages: new Map(),        // id -> MessageReceiptJSON
@@ -112,7 +116,9 @@ function readToken() {
   const match = location.hash.match(/token=([^&]+)/);
   if (match) {
     localStorage.setItem("am.token", decodeURIComponent(match[1]));
-    history.replaceState(null, "", location.pathname + location.search);
+    // Drop only the token: a link can also name a session (`#token=…&session=…`) to open after login.
+    const rest = location.hash.slice(1).split("&").filter((part) => !part.startsWith("token=")).join("&");
+    history.replaceState(null, "", location.pathname + location.search + (rest ? "#" + rest : ""));
   }
   return localStorage.getItem("am.token");
 }
@@ -176,6 +182,7 @@ async function start() {
   await loadUploadLimits();
   $("login").hidden = true;
   $("app").hidden = false;
+  render();   // shows the home pane's loading state right away, before the first snapshot arrives
   connectEvents();
 }
 
@@ -205,7 +212,8 @@ function connectEvents(delay = 500) {
       state.requests = new Map((event.requests ?? []).map((r) => [r.id, r]));
       state.messages = new Map((event.messages ?? []).map((m) => [m.id, m]));
       for (const id of [...state.terminals.keys()]) if (!state.sessions.has(id)) disposeTerminal(id);
-      applyHashSelection();
+      state.snapshotLoaded = true;
+      applyLocationSelection();
       // After a reconnect, catch up on whatever the open conversation missed (or failed to load) while offline.
       state.chatErrors.delete(state.selectedId);
       if (state.chats.has(state.selectedId)) scheduleChatFetch(state.selectedId);
@@ -215,7 +223,13 @@ function connectEvents(delay = 500) {
     } else if (event.type === "removed") {
       state.sessions.delete(event.id);
       disposeTerminal(event.id);
-      if (state.selectedId === event.id) { state.selectedId = null; state.page = "list"; }
+      // The session is gone (closed elsewhere): go home rather than guess at another one to show. This is
+      // not a navigation the user asked for, so it corrects the URL in place instead of pushing a new entry.
+      if (state.selectedId === event.id) {
+        state.selectedId = null;
+        history.replaceState(null, "", location.pathname + location.search);
+        if (isMobile()) setSidebarOpen(false);
+      }
     } else if (event.type === "request") {
       state.requests.set(event.request.id, event.request);
     } else if (event.type === "message") {
@@ -252,15 +266,29 @@ function formatClock(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-/// `/#session=<id>` (e.g. from a push notification) selects that session once there is something to select.
-function applyHashSelection() {
-  if (state.hashSelectionApplied) return;
+/// The id in `#session=<id>` (e.g. the hash a push notification links to), or null for the home URL.
+function hashSessionId() {
   const match = location.hash.match(/session=([^&]+)/);
-  if (!match) return;
-  const id = decodeURIComponent(match[1]);
-  if (!state.sessions.has(id)) return;
-  state.hashSelectionApplied = true;
-  select(id);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/// Syncs state.selectedId to whatever `#session=<id>` (or its absence) in the URL says, on first load, on
+/// every hashchange (including browser back/forward, which changes the hash too) and once the first
+/// snapshot arrives. Never picks a session on its own: an id the snapshot doesn't have goes home instead,
+/// correcting the URL in place rather than leaving the dead link live for back/forward to land on again.
+function applyLocationSelection() {
+  const id = hashSessionId();
+  if (!id) {
+    if (state.selectedId !== null) selectInternal(null);
+    return;
+  }
+  if (!state.snapshotLoaded) return;   // render() shows a loading state meanwhile; resolved once it arrives
+  if (state.sessions.has(id)) {
+    if (state.selectedId !== id) selectInternal(id);
+  } else {
+    selectInternal(null);
+    history.replaceState(null, "", location.pathname + location.search);
+  }
 }
 
 /// A session the POST just created. The event stream is the source of truth and may already carry a newer
@@ -273,24 +301,38 @@ function selected() {
   return state.sessions.get(state.selectedId) ?? null;
 }
 
-function select(id) {
+/// Applies a selection (or clears it) without touching the URL — shared by the hash-driven path above and
+/// the user-driven one below, so only one of them ever decides when to push a new history entry. Whatever
+/// is now showing (a session or home) should never be hidden behind a phone drawer left open from before.
+function selectInternal(id) {
   state.selectedId = id;
   detailTab = "conversation";
   state.renamingSelected = null;
   $("session-menu").hidden = true;
-  if (id) {
-    localStorage.setItem("am.selected", id);
-    state.page = "detail";
-    fetchChat(id);
-  }
+  if (id) fetchChat(id);
   render();
+  if (isMobile()) setSidebarOpen(false);
 }
 
-/// The mobile back button: returns to the session list without losing the selection, so the terminal
-/// and chat state are still there when the user taps back in.
-function goBack() {
-  state.page = "list";
-  render();
+/// A session row/card was clicked: select it and push a history entry, so browser back returns here.
+function select(id) {
+  if (state.selectedId === id) { if (isMobile()) setSidebarOpen(false); return; }
+  selectInternal(id);
+  history.pushState(null, "", location.pathname + location.search + "#session=" + encodeURIComponent(id));
+}
+
+/// Returns to the home pane. This only changes navigation: it never stops, closes or otherwise touches the
+/// session itself, so its view mode, drafts and attachments are exactly as they were on the next visit.
+function goHome() {
+  if (!state.settingsOpen && state.selectedId === null) {
+    if (isMobile()) setSidebarOpen(false, { focusReturn: true });
+    return;
+  }
+  const hadSession = state.selectedId !== null;
+  state.settingsOpen = false;
+  selectInternal(null);
+  if (hadSession) history.pushState(null, "", location.pathname + location.search);
+  $("home-pane").querySelector("h1")?.focus({ preventScroll: true });
 }
 
 // MARK: status — a session's phase drives both the list grouping and the detail status pill.
@@ -351,18 +393,20 @@ function relativeTime(epochSeconds) {
 // MARK: render
 
 function render() {
-  if (!selected() && state.sessions.size > 0) {
-    state.selectedId = sessionsList().sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0].id;
-  }
-  // A selection restored on load (or picked above) never went through select(); load its history here.
-  if (selected() && !state.chats.has(state.selectedId) && !state.chatErrors.has(state.selectedId)) fetchChat(state.selectedId);
+  // Selection, sidebar visibility and the session collection are independent: a session is only ever
+  // chosen by a URL, a notification or a click (see applyLocationSelection()/select()) — never guessed here.
+  const session = selected();
+  // A selection restored from the URL (or picked above) never went through select(); load its history here.
+  if (session && !state.chats.has(state.selectedId) && !state.chatErrors.has(state.selectedId)) fetchChat(state.selectedId);
   sessionsList().forEach(watchStartup);
-  $("app").classList.toggle("mobile-detail", state.page === "detail" && !!selected());
   $("app").classList.toggle("settings-open", state.settingsOpen);
   $("settings-pane").hidden = !state.settingsOpen;
+  $("home-pane").hidden = !!session;
   renderList();
   renderDetailPane();
+  if (!session) renderHomePane();
   if (state.settingsOpen) renderSettings();
+  updateSidebarChrome();
 }
 
 // MARK: session list
@@ -395,16 +439,19 @@ function needsYouCard(session) {
       : el("button", { class: "primary", type: "button", onclick: () => select(session.id) }, "View and reply", icon("arrow-right")));
 }
 
-function sessionRow(session) {
+/// `showStatus` is for the home pane's "Recent sessions" (HOME-SPEC: project, agent, status and latest
+/// progress), where there is no status-grouped section heading to carry that like the sidebar list has.
+function sessionRow(session, { showStatus = false } = {}) {
   const agent = agentFor(session);
   const current = session.id === state.selectedId;
+  const preview = showStatus ? `${PHASE_LABEL[sessionPhase(session)]} · ${session.subtitle}` : session.subtitle;
   return el("button", { class: "session-row" + (current ? " selected" : ""), type: "button",
                         "aria-current": current ? "true" : null, onclick: () => select(session.id) },
     el("span", { class: "session-row-icon" }, agent ? glyphSVG(agent.glyph, 20) : el("span")),
     el("div", { class: "session-row-body" },
       el("span", { class: "session-title-text" }, displayTitle(session)),
       el("span", { class: "session-row-sub" }, el("span", {}, session.projectName), el("span", {}, relativeTime(session.lastActivityAt))),
-      el("span", { class: "session-preview" }, session.subtitle)),
+      el("span", { class: "session-preview" }, preview)),
     icon("chevron-right"));
 }
 
@@ -414,7 +461,12 @@ function renderList() {
 
   const top = el("div", { class: "list-top" },
     el("div", { class: "brand-line" },
-      el("div", { class: "in-app-brand" }, el("img", { src: "icon.png", alt: "" }), "AgentMaster"),
+      el("div", { class: "sidebar-brand" },
+        sidebarToggleButtonNode("sidebar-collapse-button"),
+        // The enlarged brand is itself the clickable home entry (PR #9 review); there is no separate
+        // "Home" row below it, and collapse/settings stay their own buttons.
+        el("button", { class: "in-app-brand", type: "button", "aria-label": "AgentMaster home", onclick: goHome },
+          el("img", { src: "icon.png", alt: "" }), "AgentMaster")),
       el("div", { class: "brand-actions" },
         el("span", { class: "cloud-state" + (state.online ? "" : " offline") },
           icon(state.online ? "cloud" : "cloud-off"),
@@ -445,6 +497,149 @@ function renderList() {
     groups.length ? groups : el("div", { class: "list-empty" }, icon("circle-check"), "Nothing here yet. New activity will show up here."));
 
   $("list-pane").replaceChildren(top, filters, scroll);
+}
+
+// MARK: sidebar collapse (desktop) / drawer (phone) — layout only; never touches sessions, drafts or
+// terminals. See SIDEBAR-SPEC.md and the PR #9 review's "可收起左侧栏" section.
+
+function isSidebarOpen() {
+  return isMobile() ? state.sidebarOpenMobile : !state.sidebarCollapsed;
+}
+
+/// `extraClass` tells updateSidebarChrome() which buttons are the content area's "expand" buttons (home's
+/// and the session detail topbar's — hidden once a desktop sidebar is already open) versus the one inside
+/// the sidebar itself (always visible whenever the sidebar is, with nothing extra to manage).
+function sidebarToggleButtonNode(extraClass) {
+  return el("button", { type: "button", class: "icon-button" + (extraClass ? " " + extraClass : ""),
+                        "data-sidebar-toggle": "", "aria-controls": "list-pane",
+                        onclick: () => setSidebarOpen(!isSidebarOpen(), { focusReturn: true }) },
+    icon("layout-sidebar"));
+}
+
+/// Changes layout only — same contract as collapsing/expanding: the session list underneath, the selected
+/// session, its drafts and its terminal are all untouched.
+function setSidebarOpen(open, { focusReturn = false } = {}) {
+  if (isMobile()) state.sidebarOpenMobile = open;
+  else { state.sidebarCollapsed = !open; localStorage.setItem("am.sidebarCollapsed", String(!open)); }
+  updateSidebarChrome();
+  if (!focusReturn) return;
+  requestAnimationFrame(() => {
+    if (open) $("list-pane").querySelector(".sidebar-collapse-button")?.focus();
+    else document.querySelector(".sidebar-expand-button:not([hidden])")?.focus();
+  });
+}
+
+/// Applies the open/closed state to the DOM: visibility, inert/aria-hidden (a closed drawer or a collapsed
+/// sidebar is reachable by neither Tab nor a screen reader), the phone drawer's modal backdrop, and every
+/// `[data-sidebar-toggle]` button's label, aria-expanded and needs-you badge. Called after render() and
+/// after setSidebarOpen(), never a substitute for either.
+function updateSidebarChrome() {
+  const open = isSidebarOpen();
+  const mobile = isMobile();
+  const drawer = mobile && open;
+  $("app").classList.toggle("sidebar-collapsed", !mobile && !open);
+  $("app").classList.toggle("sidebar-drawer-open", drawer);
+  $("list-pane").inert = !open;
+  $("list-pane").setAttribute("aria-hidden", String(!open));
+  $("list-pane").setAttribute("role", drawer ? "dialog" : "complementary");
+  if (drawer) $("list-pane").setAttribute("aria-modal", "true");
+  else $("list-pane").removeAttribute("aria-modal");
+  $("sidebar-backdrop").hidden = !drawer;
+  // Only the phone drawer is a modal overlay; the desktop sidebar beside the content never needs this.
+  $("home-pane").inert = drawer;
+  $("detail-pane").inert = drawer;
+  const count = phaseCount("needsAttention");
+  document.querySelectorAll("[data-sidebar-toggle]").forEach((button) => {
+    button.setAttribute("aria-expanded", String(open));
+    const label = open ? (mobile ? "Close sidebar" : "Collapse sidebar") : "Expand sidebar";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    if (!button.classList.contains("sidebar-expand-button")) return;
+    button.hidden = !mobile && open;
+    let badge = button.querySelector(".sidebar-pending-count");
+    if (count > 0) {
+      if (!badge) { badge = el("span", { class: "sidebar-pending-count", "aria-hidden": "true" }); button.append(badge); }
+      badge.textContent = String(count);
+    } else badge?.remove();
+  });
+}
+
+$("sidebar-backdrop").onclick = () => setSidebarOpen(false, { focusReturn: true });
+$("sidebar-toggle").onclick = () => setSidebarOpen(!isSidebarOpen(), { focusReturn: true });
+$("back-to-home").onclick = goHome;
+
+// Esc closes the phone drawer; Tab/Shift+Tab cycle inside it instead of escaping into the inert background.
+document.addEventListener("keydown", (event) => {
+  if (!isMobile() || !state.sidebarOpenMobile || document.querySelector("dialog[open]")) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    setSidebarOpen(false, { focusReturn: true });
+  } else if (event.key === "Tab") {
+    const items = [...$("list-pane").querySelectorAll("button:not(:disabled)")];
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if (!$("list-pane").contains(document.activeElement)) { event.preventDefault(); first.focus(); }
+    else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
+});
+
+// Crossing the phone/desktop breakpoint (resizing the window, rotating) needs its layout re-applied even
+// though neither preference changed; isSidebarOpen() already reads the right one for the new width.
+window.matchMedia("(max-width: 700px)").addEventListener("change", updateSidebarChrome);
+
+// MARK: home — shown whenever no valid session is selected. See HOME-SPEC.md and the PR #9 review's "首页"
+// section: a loading state before the first snapshot, a first-run guide with none ever created, otherwise
+// New session plus needs-you items first and up to four recent sessions, sorted by real last activity.
+
+function homeTopbar() {
+  return el("header", { class: "home-topbar" },
+    sidebarToggleButtonNode("sidebar-expand-button"),
+    el("span", { class: "home-topbar-label" }, "Home"),
+    el("button", { class: "icon-button home-settings-button", type: "button", title: "Settings", "aria-label": "Settings",
+                  onclick: openSettings }, icon("settings")));
+}
+
+function renderHomePane() {
+  const pane = $("home-pane");
+  document.title = "AgentMaster";
+  if (!state.snapshotLoaded) {
+    pane.replaceChildren(homeTopbar(),
+      el("div", { class: "detail-scroll home-scroll" },
+        el("div", { class: "home-content" }, el("p", { class: "chat-placeholder" }, "Loading sessions…"))));
+    return;
+  }
+  const empty = state.sessions.size === 0;
+  const pending = sessionsList().filter((s) => sessionPhase(s) === "needsAttention")
+    .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  const recent = sessionsList().filter((s) => sessionPhase(s) !== "needsAttention")
+    .sort((a, b) => b.lastActivityAt - a.lastActivityAt).slice(0, 4);
+  const runningCount = phaseCount("running");
+
+  const newButton = el("button", { class: "primary home-create", type: "button", disabled: !state.online,
+                                   onclick: () => openNewSession(null) }, icon("plus"), "New session");
+  const note = el("p", { class: "home-start-note" },
+    state.online ? "Your work keeps running in the cloud after you leave." : "Reconnect to start a new session.");
+
+  const start = el("section", { class: "home-start" },
+    el("h1", { tabindex: "-1" }, empty ? "Start your first session" : "Continue your work"),
+    el("p", {}, empty ? "Choose a project and an agent, and hand off what you want done."
+      : !state.online ? "Showing the last synced sessions. Reconnect for updates."
+      : `${runningCount} running` + (pending.length ? `, ${pending.length} need${pending.length === 1 ? "s" : ""} you` : ", nothing needs you")),
+    newButton, note);
+
+  const pendingSection = empty || !pending.length ? null : el("section", { class: "home-section" },
+    el("h2", { class: "section-heading" }, el("span", { class: "attention-dot" }), "Needs you",
+      el("span", { class: "group-count" }, String(pending.length))),
+    pending.map(needsYouCard));
+
+  const recentSection = empty || !recent.length ? null : el("section", { class: "home-section" },
+    el("h2", { class: "section-heading" }, "Recent sessions"),
+    recent.map((session) => sessionRow(session, { showStatus: true })));
+
+  pane.replaceChildren(homeTopbar(),
+    el("div", { class: "detail-scroll home-scroll" },
+      el("div", { class: "home-content" + (empty ? " home-empty" : "") }, start, pendingSection, recentSection)));
 }
 
 // MARK: detail pane
@@ -549,7 +744,6 @@ function renderToolbar(session) {
     el("span", { class: "t-ctx" }, `ctx ${t.ctx}`), el("span", { class: "t-cost" }, t.cost));
 }
 
-$("back-to-list").onclick = goBack;
 for (const button of $("view-toggle").children) {
   button.onclick = () => {
     const session = selected();
@@ -1790,6 +1984,7 @@ const newSession = { agentId: null };
 
 /// Every ＋: a project's ＋ fills in that project, the sidebar's ＋ the selected session's; either can be changed.
 async function openNewSession(project) {
+  if (isMobile()) setSidebarOpen(false);   // from the drawer (or anywhere else) — never show it under the dialog
   try { await loadAgents(); } catch { return; }
   const installed = state.agents.filter((a) => a.location);
   newSession.agentId = (installed[0] ?? state.agents[0])?.id;
@@ -1901,8 +2096,11 @@ $("folder-choose").onclick = () => {
 // an overview list that drills into one agent (or General) on mobile. See docs' settings §7.
 
 function openSettings() {
+  if (isMobile()) setSidebarOpen(false);   // from the drawer (or anywhere else) — never show it under settings
   loadAgents().then(() => { state.settingsOpen = true; render(); }).catch(() => {});
 }
+/// Closing just flips settingsOpen back off; state.selectedId was never touched by opening it, so this
+/// naturally returns to wherever settings was opened from — home or the session that was selected.
 function closeSettings() {
   state.settingsOpen = false;
   render();
@@ -2192,10 +2390,11 @@ if ("serviceWorker" in navigator) {
 }
 
 // Pasting the printed link into a tab that is already open only changes the hash; a notification click
-// does the same with `#session=`, so both are handled on hashchange as well as on first load.
+// does the same with `#session=`, so both are handled on hashchange as well as on first load. Browser
+// back/forward across the history entries select()/goHome() push also lands here, since they change the
+// hash too — pushState/replaceState do not fire this on their own, so there is no risk of a loop.
 window.addEventListener("hashchange", () => {
   if (/token=/.test(location.hash)) return start();
-  state.hashSelectionApplied = false;
-  applyHashSelection();
+  applyLocationSelection();
 });
 start();

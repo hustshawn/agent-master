@@ -47,7 +47,6 @@ svg { display: block; flex: none; }
 .dim { color: var(--muted); }
 .error { color: var(--error); margin: 0; }
 .path { font-family: var(--mono); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mobile-only { display: none; }
 
 /* Login */
 .login { height: 100%; display: grid; place-items: center; }
@@ -57,20 +56,44 @@ svg { display: block; flex: none; }
 .login-card h1 { margin: 0; font-size: 24px; }
 .login-card p { margin: 0; color: var(--muted); }
 
-/* MARK: app shell — list / detail / settings, as a two-column grid; settings takes the whole row when open. */
-.app { height: 100%; display: grid; grid-template-columns: 360px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-.app.settings-open { grid-template-columns: minmax(0, 1fr); }
-.app.settings-open .list-pane, .app.settings-open .detail-pane { display: none; }
+/* MARK: app shell — list / home / detail / settings, as a flex row; settings takes the whole row when open.
+   A flex row (not a grid) means a hidden list-pane (sidebar collapsed) automatically gives its width back to
+   whichever of home-pane/detail-pane is showing, with no column math to keep in sync. */
+.app { height: 100%; display: flex; position: relative; isolation: isolate; }
+.app.settings-open .list-pane, .app.settings-open .home-pane, .app.settings-open .detail-pane { display: none; }
 .app:not(.settings-open) .settings-pane { display: none; }
-.list-pane, .detail-pane, .settings-pane { min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-.list-pane { border-right: 1px solid var(--line); }
+.app.sidebar-collapsed .list-pane { display: none; }
+.list-pane, .home-pane, .detail-pane, .settings-pane { min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.list-pane { flex: 0 0 360px; border-right: 1px solid var(--line); }
+.home-pane, .detail-pane, .settings-pane { flex: 1; min-width: 0; }
+.sidebar-backdrop { display: none; }
 
 /* MARK: session list */
 .list-top { padding: 18px 18px 12px; flex: none; }
 .brand-line { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 8px; }
-.in-app-brand { display: flex; align-items: center; gap: 9px; font-size: 17px; font-weight: 650; letter-spacing: -0.2px; }
-.in-app-brand img { width: 26px; height: 26px; border-radius: 6px; }
-.brand-actions { display: flex; align-items: center; gap: 4px; }
+.sidebar-brand { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* The brand is itself the home entry (see the PR #9 review): bigger than a regular nav row, and a real
+   <button> so it is reachable and announced as one; no separate "Home" row underneath it. */
+.in-app-brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 680; letter-spacing: -0.3px;
+  background: none; border: none; padding: 4px 6px; margin: -4px -6px; border-radius: 8px; cursor: pointer; }
+.in-app-brand:hover { background: var(--raised); }
+.in-app-brand img { width: 30px; height: 30px; border-radius: 7px; }
+.brand-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+/* In a phone-width drawer the bigger brand leaves no room for "Online": keep its icon (the word is still
+   read out, being only shrunk to nothing); "Offline"/"Reconnecting…" always keep their words. */
+@media (max-width: 420px) {
+  .list-pane .cloud-state:not(.offline) { font-size: 0; gap: 0; }
+}
+/* A 320px phone leaves a ~276px drawer: one size down still reads as the brand. */
+@media (max-width: 360px) {
+  .in-app-brand { font-size: 16px; gap: 7px; margin-right: 0; }
+  .in-app-brand img { width: 26px; height: 26px; }
+  .brand-line { gap: 12px; }
+}
+/* `.icon-button.…` (not just `.…`) to outweigh `button.icon-button`'s own 34px minimum (MARK: base, above). */
+.icon-button.sidebar-expand-button, .icon-button.sidebar-collapse-button { position: relative; min-width: 44px; min-height: 44px; }
+.sidebar-pending-count { position: absolute; top: 2px; right: 1px; min-width: 15px; padding: 0 3px; border: 2px solid var(--bg);
+  border-radius: 9px; background: var(--warning); color: #302319; font: 600 9px/13px var(--sans); text-align: center; }
 .cloud-state { display: inline-flex; gap: 5px; align-items: center; color: var(--teal); font-size: 13px; white-space: nowrap; }
 .cloud-state svg { width: 14px; height: 14px; }
 .cloud-state.offline { color: var(--warning); }
@@ -124,13 +147,33 @@ svg { display: block; flex: none; }
 .list-empty { padding: 44px 18px; text-align: center; color: var(--muted); font-size: 15px; }
 .list-empty svg { width: 26px; height: 26px; margin: 0 auto 10px; color: var(--teal); }
 
+/* MARK: home — shown whenever no valid session is selected (see render()/renderHomePane() in app.js). */
+.home-topbar { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--line);
+  flex: none; min-height: 52px; }
+.home-topbar-label { flex: 1; color: var(--muted); font-size: 15px; font-weight: 600; }
+.icon-button.home-settings-button { flex: none; min-width: 44px; min-height: 44px; }
+@media (min-width: 701px) {
+  /* Redundant with the sidebar's own Settings button once the sidebar is expanded. */
+  .app:not(.sidebar-collapsed) .home-settings-button { display: none; }
+}
+.home-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.home-content { max-width: 700px; margin: 0 auto; padding: 28px 24px 44px; }
+.home-start h1 { margin: 0; font-size: 26px; font-weight: 630; letter-spacing: -0.6px; }
+.home-start p { margin: 10px 0 0; color: var(--muted); font-size: 14.5px; line-height: 1.7; }
+.home-create { margin-top: 18px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.home-create svg { width: 17px; height: 17px; }
+.home-start-note { font-size: 12.5px; color: var(--faint); margin: 10px 0 0 !important; }
+.home-section { margin-top: 32px; }
+.home-section .needs-you-card + .needs-you-card { margin-top: 12px; }
+.home-empty { margin: auto; padding-top: 10vh; text-align: center; }
+.home-empty .home-create { display: inline-flex; min-width: 220px; }
+
 /* MARK: detail pane */
 .detail-topbar { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--line);
   flex: none; min-height: 52px; position: relative; }
 .back-button { display: flex; align-items: center; gap: 5px; min-height: 32px; font-size: 15px; color: var(--muted);
   background: none; border: none; padding: 4px; flex: none; }
 .back-button svg { width: 17px; height: 17px; }
-.back-button.mobile-only { display: none; }   /* the list stays beside the detail on a desktop */
 .session-toolbar { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
 .mode-switch { display: inline-flex; flex: none; border: 1px solid #35363e; background: #19191e; border-radius: 7px;
   padding: 2px; }
@@ -517,12 +560,17 @@ dialog.attach-sheet { padding: 0; }
 
 /* MARK: mobile layout — list / detail / settings become full-screen pages. */
 @media (max-width: 700px) {
-  .app { grid-template-columns: minmax(0, 1fr); position: fixed; inset: 0; height: auto; }
-  .app:not(.mobile-detail):not(.settings-open) .detail-pane { display: none; }
-  .app.mobile-detail:not(.settings-open) .list-pane { display: none; }
-  .mobile-only { display: inline-flex; }
-  .back-button.mobile-only { display: flex; }
-  .list-pane { border-right: none; }
+  .app { position: fixed; inset: 0; height: auto; }
+  /* The sidebar is a left drawer here, closed by default (see setSidebarOpen()/updateSidebarChrome() in
+     app.js): taken out of the flex flow and pinned instead, so a closed list-pane needs no flex-basis
+     bookkeeping the way the desktop collapse does — it just slides off-screen. */
+  .list-pane { position: absolute; inset: 0 auto 0 0; z-index: 30; width: min(340px, calc(100% - 44px));
+    background: #1c1c21; transform: translateX(-100%); visibility: hidden;
+    transition: transform 0.2s ease, visibility 0s linear 0.2s; box-shadow: 2px 0 24px rgba(0, 0, 0, 0.4); }
+  .app.sidebar-drawer-open .list-pane { transform: translateX(0); visibility: visible; transition-delay: 0s; }
+  .sidebar-backdrop { display: block; position: absolute; inset: 0; z-index: 29; background: rgba(0, 0, 0, 0.5); }
+  .home-topbar { padding-top: calc(9px + env(safe-area-inset-top)); }
+  .home-content { padding: 22px 18px 36px; }
   /* A long first prompt as the title must not push the conversation off the screen. */
   .detail-summary h1 { font-size: 19px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
     overflow: hidden; }

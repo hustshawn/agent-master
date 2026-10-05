@@ -30,11 +30,17 @@
 
   <div id="app" class="app" hidden>
     <aside id="list-pane" class="list-pane"></aside>
+    <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+
+    <section id="home-pane" class="home-pane" hidden></section>
 
     <section id="detail-pane" class="detail-pane" hidden>
       <header id="detail-topbar" class="detail-topbar">
-        <button id="back-to-list" class="back-button mobile-only" type="button" title="Back">
-          <svg data-icon="arrow-left"></svg><span>Sessions</span>
+        <button id="sidebar-toggle" class="icon-button sidebar-expand-button" type="button" data-sidebar-toggle aria-controls="list-pane">
+          <svg data-icon="layout-sidebar"></svg>
+        </button>
+        <button id="back-to-home" class="back-button" type="button" title="Back to home">
+          <svg data-icon="arrow-left"></svg><span>Home</span>
         </button>
         <div class="session-toolbar">
           <div id="view-toggle" class="mode-switch" role="group" aria-label="Session view">

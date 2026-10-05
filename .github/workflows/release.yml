@@ -39,7 +39,7 @@ jobs:
       - name: Disk image
         run: ./scripts/make-dmg.sh "AgentMaster-$TAG.dmg"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: app
           path: AgentMaster-*.dmg
@@ -63,7 +63,7 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then TAG="$GITHUB_REF_NAME"; else TAG=v0.0.0; fi
           scripts/package-server.sh "build/agentmaster-server-$TAG-linux-$(uname -m)"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: server-${{ matrix.runner }}
           path: build/agentmaster-server-*.tar.gz
@@ -75,7 +75,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true

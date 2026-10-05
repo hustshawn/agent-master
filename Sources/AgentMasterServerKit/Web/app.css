@@ -333,9 +333,12 @@ svg { display: block; flex: none; }
 .attach-menu { position: absolute; left: 0; bottom: calc(100% + 9px); z-index: 20; width: 238px; padding: 6px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
   display: flex; flex-direction: column; }
-.attach-menu-item { width: 100%; display: flex; align-items: center; gap: 13px; text-align: left; min-height: 58px;
-  padding: 10px 12px; border-radius: 6px; background: none; border: none; color: var(--text); font-weight: normal; }
-.attach-menu-item:hover, .attach-menu-item:focus-visible { background: var(--raised); }
+/* Two classes deep on purpose: the menu sits inside the input row, whose `… button` rule is the blue Send. */
+.attach-menu .attach-menu-item, .attach-sheet-choices .attach-menu-item { width: 100%; display: flex; align-items: center;
+  gap: 13px; text-align: left; min-height: 58px; padding: 10px 12px; border-radius: 6px; background: none; border: none;
+  color: var(--text); font-weight: normal; }
+.attach-menu .attach-menu-item:hover, .attach-menu .attach-menu-item:focus-visible,
+.attach-sheet-choices .attach-menu-item:hover, .attach-sheet-choices .attach-menu-item:focus-visible { background: var(--raised); }
 .attach-menu-item svg { width: 22px; height: 22px; color: var(--muted); flex: none; }
 .attach-menu-item strong { display: block; font-size: 13px; font-weight: 500; }
 .attach-menu-item small { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }

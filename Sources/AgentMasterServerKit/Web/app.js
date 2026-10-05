@@ -1077,11 +1077,11 @@ async function interruptSession(session) {
 // message. Uploading and sending are separate: a message only clears its attachments once the server has
 // confirmed the send, and the server (not here) adds the attachments' paths to the agent's prompt.
 
-/// What the "+" menu offers, in order. Each kind opens the system picker with its own filter; another kind
-/// (a camera shortcut, a project file picker…) is one more entry here plus its handling in pickAttachment.
+/// What "+" offers, in order. With one kind, "+" opens its picker straight away; with more, a menu (desktop)
+/// or a sheet (phone) lets the user choose. Another kind (a project file picker…) is one more entry here plus
+/// its handling in pickAttachment. The system's file picker already offers photos, the camera and files.
 const ATTACH_KINDS = [
-  { id: "image", label: "Photo or image", description: "Choose images, several at once", icon: "photo", accept: "image/*" },
-  { id: "file", label: "File", description: "Choose a file from this device", icon: "file", accept: "" },
+  { id: "file", label: "File", description: "Photos, screenshots, documents…", icon: "file", accept: "" },
 ];
 
 function attachmentsFor(sessionId) { return state.attachments.get(sessionId) ?? []; }
@@ -1429,6 +1429,16 @@ $("composer").addEventListener("submit", (event) => {
 
 let attachMenuButton = null;   // the "+" a desktop menu is currently open for, to return focus to on close
 
+// With a single kind "+" opens the picker itself, so it is not a menu button and is named for what it does.
+if (ATTACH_KINDS.length === 1) {
+  for (const button of [$("composer-attach"), $("terminal-attach")]) {
+    button.removeAttribute("aria-haspopup");
+    button.removeAttribute("aria-expanded");
+    button.title = "Add files";
+    button.setAttribute("aria-label", "Add files");
+  }
+}
+
 function attachChoiceButtons(onPick, menuRole) {
   return ATTACH_KINDS.map((kind) => el("button", { type: "button", class: "attach-menu-item", role: menuRole ? "menuitem" : undefined,
     onclick: () => onPick(kind) }, icon(kind.icon), el("span", {}, el("strong", {}, kind.label), el("small", {}, kind.description))));
@@ -1436,6 +1446,7 @@ function attachChoiceButtons(onPick, menuRole) {
 
 /// The "+" menu, shared by the chat composer and the terminal input bar: `onFiles` receives what was picked.
 function openAttachMenu(button, onFiles, { multiple }) {
+  if (ATTACH_KINDS.length === 1) return pickAttachment(ATTACH_KINDS[0], onFiles, multiple);
   if (isMobile()) return openAttachSheet(button, onFiles, multiple);
   const menu = $("attach-menu");
   if (!menu.hidden && menu.parentElement === button.parentElement) return closeAttachMenu();

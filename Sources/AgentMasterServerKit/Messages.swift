@@ -5,7 +5,10 @@ public struct MessageReceiptJSON: Codable, Equatable, Sendable {
     /// Chosen by the browser, so a retry of the same send is recognised.
     public let id: String
     public let sessionId: String
+    /// What the user wrote; the prompt also carries the attachments' paths (see `MessageStore.prompt`).
     public let text: String
+    /// Sent with the message, in order; the browser shows them with it.
+    public let attachments: [AttachmentJSON]
     public let createdAt: Double
     /// "written" (typed into the terminal), "delivered" (the agent reported the prompt) or
     /// "unconfirmed" (no report in time; it may or may not have arrived).
@@ -48,12 +51,18 @@ final class MessageStore: @unchecked Sendable {
     /// while it reads the image; an extra Enter on an already empty input does nothing.
     static let enterDelays: [TimeInterval] = [0.3, 2.5, 6]
 
-    /// Writes `text` into the session as typed input, unless a send with the same `id` already happened.
+    /// The text, then the attachments' paths, for the agent to read: Claude Code turns an image's path into an
+    /// attached image, and reads other files with its tools.
+    static func prompt(_ text: String, attachments: [AttachmentJSON]) -> String {
+        [text, attachments.map(\.path).joined(separator: " ")].filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
+
+    /// Writes the prompt into the session as typed input, unless a send with the same `id` already happened.
     /// `idle` is whether the agent is waiting for a prompt; `write` types into its terminal.
-    func send(id: String, sessionId: String, text: String, idle: Bool,
+    func send(id: String, sessionId: String, text: String, attachments: [AttachmentJSON] = [], idle: Bool,
               write: @escaping @Sendable (Data) -> Void) throws -> MessageReceiptJSON {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw MessageError.empty }
+        guard !trimmed.isEmpty || !attachments.isEmpty else { throw MessageError.empty }
         lock.lock()
         if let existing = receipts[id] {
             lock.unlock()
@@ -67,11 +76,11 @@ final class MessageStore: @unchecked Sendable {
             lock.unlock()
             throw MessageError.busy("The previous message has not reached the agent yet.")
         }
-        let receipt = MessageReceiptJSON(id: id, sessionId: sessionId, text: trimmed,
+        let receipt = MessageReceiptJSON(id: id, sessionId: sessionId, text: trimmed, attachments: attachments,
                                          createdAt: Date().timeIntervalSince1970, status: "written")
         receipts[id] = receipt
         lock.unlock()
-        write(Self.pasted(trimmed))
+        write(Self.pasted(Self.prompt(trimmed, attachments: attachments)))
         for (index, delay) in Self.enterDelays.enumerated() {
             DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
                 // The first Enter always; the later ones only while the prompt still has not arrived.
@@ -93,7 +102,7 @@ final class MessageStore: @unchecked Sendable {
         let reported = Self.withoutWhitespace(prompt)
         let match = receipts.values.first {
             $0.sessionId == sessionId && $0.status == "written"
-                && reported.contains(Self.withoutWhitespace(Self.withoutImagePaths($0.text)))
+                && reported.contains(Self.withoutWhitespace(Self.withoutImagePaths(Self.prompt($0.text, attachments: $0.attachments))))
         }
         lock.unlock()
         if let match { update(match.id, from: "written", to: "delivered") }

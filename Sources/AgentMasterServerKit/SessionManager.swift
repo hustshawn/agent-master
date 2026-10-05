@@ -22,6 +22,8 @@ public enum SessionManagerError: Error, CustomStringConvertible {
     case unknownAgent(String)
     case unknownSession(String)
     case unsupportedImage(String)
+    case unknownAttachment(String)
+    case tooManyAttachments(Int)
 
     public var description: String {
         switch self {
@@ -29,6 +31,8 @@ public enum SessionManagerError: Error, CustomStringConvertible {
         case .unknownAgent(let id): return "Unknown agent \(id)."
         case .unknownSession(let id): return "Unknown session \(id)."
         case .unsupportedImage(let type): return "\(type.isEmpty ? "This file" : type) is not a PNG, JPEG, GIF or WebP image."
+        case .unknownAttachment: return "That attachment is not in this session anymore. Remove it and add the file again."
+        case .tooManyAttachments(let limit): return "A message can carry at most \(limit) attachments."
         }
     }
 }
@@ -64,6 +68,7 @@ public final class SessionManager: @unchecked Sendable {
     private var hookServer: HookServer?
     private let requests = ActionRequestStore()
     private let messages = MessageStore()
+    private let attachments = AttachmentStore()
     public let push: PushNotifier
 
     private let lock = NSLock()
@@ -202,13 +207,27 @@ public final class SessionManager: @unchecked Sendable {
     /// goes away with the session, and returns its path for the prompt. The name keeps its extension, so an
     /// agent still recognizes an image, and loses spaces and anything but letters, digits, `.`, `_` and `-`,
     /// so the path stays one word in the prompt.
-    public func saveFile(sessionId id: String, data: Data, filename: String) throws -> String {
+    public func saveFile(sessionId id: String, data: Data, filename: String, contentType: String) throws -> AttachmentJSON {
         guard session(id: id) != nil else { throw SessionManagerError.unknownSession(id) }
         let directory = paths.sessionDirectory(id).appendingPathComponent("files")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent("\(UUID().uuidString.prefix(8).lowercased())-\(Self.safeFilename(filename))")
+        let attachmentId = UUID().uuidString.prefix(8).lowercased()
+        let url = directory.appendingPathComponent("\(attachmentId)-\(Self.safeFilename(filename))")
         try data.write(to: url)
-        return url.path
+        let attachment = AttachmentJSON(id: String(attachmentId), sessionId: id, name: filename,
+                                        type: contentType.isEmpty ? "application/octet-stream" : contentType,
+                                        size: data.count, url: "/api/sessions/\(id)/files/\(attachmentId)", path: url.path)
+        attachments.add(attachment)
+        return attachment
+    }
+
+    /// An attachment uploaded to this session, with its bytes, for a preview or a download.
+    public func attachment(sessionId: String, id: String) throws -> (AttachmentJSON, Data) {
+        guard let attachment = attachments.find(sessionId: sessionId, id: id),
+              let data = FileManager.default.contents(atPath: attachment.path) else {
+            throw SessionManagerError.unknownAttachment(id)
+        }
+        return (attachment, data)
     }
 
     static func safeFilename(_ name: String) -> String {
@@ -230,6 +249,7 @@ public final class SessionManager: @unchecked Sendable {
         session.onChange = nil
         requests.expire(sessionId: id, reason: "session closed")
         messages.removeAll(sessionId: id)
+        attachments.removeAll(sessionId: id)
         session.process.terminate()
         paths.removeSessionDirectory(sessionId: id)
         persist()
@@ -257,9 +277,21 @@ public final class SessionManager: @unchecked Sendable {
 
     /// Types `text` into the session as a prompt, only while the agent waits for one. A repeated `messageId`
     /// returns the first send's receipt instead of typing it again.
-    public func send(sessionId: String, messageId: String, text: String) throws -> MessageReceiptJSON {
+    /// `attachmentIds` must be this session's uploads; their paths are added to the prompt here, so the agent
+    /// reads them, and the receipt keeps them for the browser to show with the message.
+    public func send(sessionId: String, messageId: String, text: String,
+                     attachmentIds: [String] = []) throws -> MessageReceiptJSON {
         guard let session = session(id: sessionId) else { throw SessionManagerError.unknownSession(sessionId) }
-        return try messages.send(id: messageId, sessionId: sessionId, text: text, idle: session.state.status == .idle) {
+        let limit = UploadLimitsJSON.current.maxAttachmentsPerMessage
+        guard attachmentIds.count <= limit else { throw SessionManagerError.tooManyAttachments(limit) }
+        let attached = try attachmentIds.map { id in
+            guard let attachment = attachments.find(sessionId: sessionId, id: id) else {
+                throw SessionManagerError.unknownAttachment(id)
+            }
+            return attachment
+        }
+        return try messages.send(id: messageId, sessionId: sessionId, text: text, attachments: attached,
+                                 idle: session.state.status == .idle) {
             session.process.write($0)
         }
     }

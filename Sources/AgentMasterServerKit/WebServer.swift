@@ -16,9 +16,12 @@ import AgentMasterBridge
 ///     PATCH  /api/sessions/{id}                        {"name": "..."}
 ///     DELETE /api/sessions/{id}
 ///     POST   /api/sessions/{id}/images                 an image as the body (Content-Type image/*): {"path"}
-///     POST   /api/sessions/{id}/files?name=            any file as the body, kept with the session: {"path"}
+///     POST   /api/sessions/{id}/files?name=            any file as the body, kept with the session: AttachmentJSON
+///     GET    /api/sessions/{id}/files/{attachment}     the file, to preview or download
+///     GET    /api/uploads/limits                       UploadLimitsJSON: largest file, attachments per message
 ///     GET    /api/sessions/{id}/chat?after=            the conversation as ChatJSON; replace from `start`
-///     POST   /api/sessions/{id}/messages              {"id", "text"}: types a prompt; MessageReceiptJSON (409 if busy)
+///     POST   /api/sessions/{id}/messages              {"id", "text", "attachments"?: [id]}: types a prompt;
+///                                                      MessageReceiptJSON (409 if busy)
 ///     PUT    /api/sessions/{id}/reviewed               {"reviewed": bool}: marks the last turn's result reviewed
 ///     POST   /api/sessions/{id}/interrupt              stops the current turn (Esc)
 ///     GET    /api/requests                             open and recently resolved approvals and questions
@@ -39,6 +42,7 @@ public enum WebServer {
                                        webRoot: String, logger: Logger) -> some ApplicationProtocol {
         let router = Router(context: BasicWebSocketRequestContext.self)
         router.middlewares.add(TokenMiddleware(token: token))
+        router.middlewares.add(RevalidateMiddleware())
         router.middlewares.add(FileMiddleware(webRoot, searchForIndexHtml: true))
         addRoutes(to: router, manager: manager)
         return Application(
@@ -95,19 +99,27 @@ public enum WebServer {
                                                           data: Data(body.readableBytesView), contentType: contentType))
             }
         }
-        api.post("sessions/:id/files") { request, context -> ImageResponse in
+        api.post("sessions/:id/files") { request, context -> AttachmentJSON in
+            let limit = UploadLimitsJSON.current.maxFileBytes
             let body: ByteBuffer
             do {
-                body = try await request.body.collect(upTo: maxFileBytes)
+                body = try await request.body.collect(upTo: limit)
             } catch is NIOTooManyBytesError {
-                throw HTTPError(.contentTooLarge, message: "Files can be at most \(maxFileBytes / 1024 / 1024) MB.")
+                throw HTTPError(.contentTooLarge, message: "Files can be at most \(limit / 1024 / 1024) MB.")
             }
+            let contentType = request.headers[.contentType]?.split(separator: ";").first.map(String.init) ?? ""
             return try mapErrors {
-                ImageResponse(path: try manager.saveFile(sessionId: context.parameters.require("id"),
-                                                         data: Data(body.readableBytesView),
-                                                         filename: request.uri.queryParameters.get("name") ?? "file"))
+                try manager.saveFile(sessionId: context.parameters.require("id"), data: Data(body.readableBytesView),
+                                     filename: request.uri.queryParameters.get("name") ?? "file", contentType: contentType)
             }
         }
+        api.get("sessions/:id/files/:file") { _, context -> Response in
+            let (attachment, data) = try mapErrors {
+                try manager.attachment(sessionId: context.parameters.require("id"), id: context.parameters.require("file"))
+            }
+            return attachmentResponse(attachment, data: data)
+        }
+        api.get("uploads/limits") { _, _ in UploadLimitsJSON.current }
         api.delete("sessions/:id") { _, context -> HTTPResponse.Status in
             try mapErrors { try manager.close(id: context.parameters.require("id")) }
             return .noContent
@@ -119,7 +131,8 @@ public enum WebServer {
         api.post("sessions/:id/messages") { request, context -> MessageReceiptJSON in
             let body = try await request.decode(as: MessageRequest.self, context: context)
             return try mapErrors {
-                try manager.send(sessionId: context.parameters.require("id"), messageId: body.id, text: body.text)
+                try manager.send(sessionId: context.parameters.require("id"), messageId: body.id, text: body.text,
+                                 attachmentIds: body.attachments ?? [])
             }
         }
         api.put("sessions/:id/reviewed") { request, context -> HTTPResponse.Status in
@@ -212,7 +225,22 @@ public enum WebServer {
     }
 
     static let maxImageBytes = 20 * 1024 * 1024
-    static let maxFileBytes = 50 * 1024 * 1024
+
+    /// Types a browser shows itself without running anything; everything else is downloaded.
+    static let inlineTypes: Set<String> = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain"]
+
+    /// An uploaded file served back from this origin, which holds the token: it is never a page that can run
+    /// script here (no inline HTML or SVG, sandboxed, no type sniffing).
+    static func attachmentResponse(_ attachment: AttachmentJSON, data: Data) -> Response {
+        let inline = inlineTypes.contains(attachment.type)
+        let encodedName = attachment.name.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "file"
+        var headers = HTTPFields()
+        headers[.contentType] = inline ? attachment.type : "application/octet-stream"
+        headers[.contentDisposition] = "\(inline ? "inline" : "attachment"); filename*=UTF-8''\(encodedName)"
+        headers[.contentSecurityPolicy] = "sandbox"
+        headers[.init("X-Content-Type-Options")!] = "nosniff"
+        return Response(status: .ok, headers: headers, body: .init(byteBuffer: ByteBuffer(bytes: data)))
+    }
 
     static func json<T: Encodable>(_ value: T) throws -> String {
         String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
@@ -315,6 +343,16 @@ struct TokenMiddleware<Context: RequestContext>: RouterMiddleware {
     }
 }
 
+/// The page's files are cached but always revalidated (a cheap 304 by ETag), so after an upgrade a browser
+/// never pairs a new index.html with an old app.js and shows a blank page.
+struct RevalidateMiddleware<Context: RequestContext>: RouterMiddleware {
+    func handle(_ request: Request, context: Context, next: (Request, Context) async throws -> Response) async throws -> Response {
+        var response = try await next(request, context)
+        if !request.uri.path.hasPrefix("/api/") { response.headers[.cacheControl] = "no-cache" }
+        return response
+    }
+}
+
 struct AgentsResponse: ResponseEncodable {
     let agents: [AgentJSON]
     let restoreSessionsOnLaunch: Bool
@@ -360,6 +398,8 @@ struct ReviewedRequest: Decodable {
 struct MessageRequest: Decodable {
     let id: String
     let text: String
+    /// Ids from POST /api/sessions/{id}/files, sent with the text.
+    let attachments: [String]?
 }
 
 struct AnswerRequest: Decodable {
@@ -399,6 +439,8 @@ struct UnsubscribeRequest: Decodable {
 extension SessionJSON: ResponseEncodable {}
 extension MessageReceiptJSON: ResponseEncodable {}
 extension ChatJSON: ResponseEncodable {}
+extension AttachmentJSON: ResponseEncodable {}
+extension UploadLimitsJSON: ResponseEncodable {}
 extension ActionRequestJSON: ResponseEncodable {}
 
 /// Subfolders of one folder on the server, for choosing where a session runs.

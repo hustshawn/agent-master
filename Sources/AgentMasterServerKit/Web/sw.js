@@ -3,7 +3,7 @@
 // server upgrade reaches clients on their next load; the copy is only for when the server is unreachable.
 "use strict";
 
-const CACHE = "agentmaster-2";
+const CACHE = "agentmaster-3";
 const ASSETS = [
   "./", "index.html", "app.css", "app.js", "icon.png", "manifest.webmanifest",
   "vendor/xterm.css", "vendor/xterm.js", "vendor/addon-fit.js", "vendor/addon-web-links.js", "vendor/marked.min.js",

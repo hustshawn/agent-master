@@ -45,6 +45,7 @@ const ICON_SOURCE = {
   "terminal-2": '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l3 3l-3 3" /><path d="M13 15l3 0" /><path d="M3 4m0 2a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2z" /></svg>',
   dots: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /><path d="M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /><path d="M19 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /></svg>',
   "shield-check": '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.46 20.846a12 12 0 0 1 -7.96 -14.846a12 12 0 0 0 8.5 -3a12 12 0 0 0 8.5 3a12 12 0 0 1 -.09 7.06" /><path d="M15 19l2 2l4 -4" /></svg>',
+  refresh: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" /></svg>',
 };
 const iconTemplates = new Map();
 function icon(name, size) {
@@ -85,7 +86,12 @@ const state = {
   chatFetching: new Set(),    // sessionId currently mid-fetch
   chatErrors: new Map(),      // sessionId -> why its conversation failed to load, until the next try
   interrupted: new Set(),     // sessionIds interrupted from here, until their next message
-  attachments: new Map(),     // sessionId -> images added to the composer: { key, name, preview, uploading, path, error }
+  // sessionId -> draft attachments: { key, file, name, size, image, localUrl, status, progress, error,
+  //              retryable, attachment (the uploaded AttachmentJSON, once ready), xhr (while uploading) }.
+  // status is "uploading" | "ready" | "offline" (waiting for the connection) | "failed".
+  attachments: new Map(),
+  uploadLimits: null,          // UploadLimitsJSON, loaded once at login; null skips client-side checks
+  sending: new Map(),         // sessionId -> { text, keys: Set(attachment key) } snapshot while a send is in flight
   chatTimers: new Map(),      // sessionId -> { soon, late } refetch timeouts
   chatStuck: new Map(),       // sessionId -> whether the transcript is scrolled to the bottom
   answerDrafts: new Map(),    // requestId -> Map(question -> Set(chosen labels))
@@ -167,6 +173,7 @@ async function start() {
     if (error.message !== "unauthorized") showLogin("Could not reach the server: " + error.message);
     return;
   }
+  await loadUploadLimits();
   $("login").hidden = true;
   $("app").hidden = false;
   connectEvents();
@@ -177,6 +184,12 @@ async function loadAgents() {
   state.agents = response.agents;
   state.restoreSessionsOnLaunch = response.restoreSessionsOnLaunch;
   state.home = response.home;
+}
+
+/// The server's own format/size/count rules, for the picker and client-side validation. Not fetching this
+/// is not fatal — attachments just fall back to whatever the server itself rejects.
+async function loadUploadLimits() {
+  try { state.uploadLimits = await api("GET", "/api/uploads/limits"); } catch { state.uploadLimits = null; }
 }
 
 // MARK: live session list
@@ -311,8 +324,9 @@ const PHASE_PILL_CLASS = { needsAttention: "needs-you", running: "", review: "re
                            stopped: "stopped" };
 
 /// The title without Claude Code's "[Image #N]" placeholders, which a first prompt with an image starts with.
+/// Neither are an uploaded file's paths, when the first message was attachments only.
 function displayTitle(session) {
-  return session.title.replace(/\[Image #\d+\]\s*/g, "").trim() || "Image";
+  return session.title.replace(ATTACHMENT_IN_PROMPT_G, "").replace(/\s+/g, " ").trim() || "Attachments";
 }
 
 function sessionsList() { return [...state.sessions.values()]; }
@@ -458,6 +472,7 @@ function renderDetailPane() {
   if (view === "terminal") {
     showTerminal(session);
     renderTerminalInputBar(session);
+    renderTerminalAttachmentsNote(session);
   } else {
     renderChatArea(session);
   }
@@ -851,8 +866,10 @@ function renderConversation(session) {
     $("chat-messages").replaceChildren(emptyConversation(session));
     return;
   }
+  // Each receipt with attachments is linked to at most one transcript item, oldest first (see receiptForItem).
+  const consumedReceipts = new Set();
   $("chat-messages").replaceChildren(...groupChatItems(items).map((group) => {
-    if (group.type === "user") return userBubble(group.item);
+    if (group.type === "user") return userBubble(group.item, session, consumedReceipts);
     if (group.type === "assistant") return assistantBubble(group.item, agent, session.agentName);
     if (group.type === "step") return stepNode(group.item);
     return el("details", { class: "step-group" },
@@ -864,9 +881,30 @@ function renderConversation(session) {
 /// An attachment's place in a prompt: Claude Code's "[Image #N]", or the path of a file uploaded from here
 /// (`…/sessions/<id>/files/<8 hex>-<name>`, or `…/images/` from a terminal paste).
 const ATTACHMENT_IN_PROMPT = /(\[Image #\d+\]|\/\S+\/sessions\/[^/\s]+\/(?:files|images)\/\S+)/;
+const ATTACHMENT_IN_PROMPT_G = new RegExp(ATTACHMENT_IN_PROMPT.source, "g");
 
-/// Shows each attachment in a prompt as a tag instead of raw text.
-function userBubble(item) {
+function withoutWhitespace(text) { return text.replace(/\s+/g, ""); }
+
+/// The receipt (if any) that produced this transcript item: its text, once Claude Code's own placeholders
+/// and any attachment paths are stripped, is exactly what the browser sent (see Messages.swift, which does
+/// this same comparison live to confirm delivery). Each receipt is claimed by at most one item.
+function receiptForItem(item, sessionId, consumed) {
+  const stripped = withoutWhitespace(item.text.replace(ATTACHMENT_IN_PROMPT_G, ""));
+  for (const receipt of state.messages.values()) {
+    if (receipt.sessionId !== sessionId || !receipt.attachments.length || consumed.has(receipt.id)) continue;
+    if (withoutWhitespace(receipt.text) === stripped) { consumed.add(receipt.id); return receipt; }
+  }
+  return null;
+}
+
+/// A sent message: its attachments (if any) as thumbnails or file cards, then its own text. Falls back to
+/// tagging raw placeholders when no receipt matches — typed into the terminal, or lost to a server restart.
+function userBubble(item, session, consumed) {
+  const receipt = receiptForItem(item, session.id, consumed);
+  if (receipt) {
+    return el("div", { class: "msg msg-user" }, el("div", { class: "bubble" },
+      receipt.attachments.length ? sentAttachments(receipt.attachments) : null, receipt.text || null));
+  }
   const parts = item.text.split(ATTACHMENT_IN_PROMPT).filter(Boolean).map((part) => {
     const image = part.match(/^\[Image #(\d+)\]$/);
     if (image) return el("span", { class: "image-tag" }, icon("photo"), `Image ${image[1]}`);
@@ -986,20 +1024,24 @@ function renderComposer(session) {
     lastComposerSessionId = session.id;
   }
   const idle = session.status === "idle";
+  const sending = state.sending.has(session.id);
+  const list = attachmentsFor(session.id);
+  const blocked = list.some((a) => a.status !== "ready");
   // Offline, typing still works (the draft is kept), only sending waits for the connection.
-  $("composer-text").disabled = !idle;
-  // Images can be added while the agent works, ready for the next message.
-  $("composer-attach").disabled = session.status === "ended";
-  $("composer-send").disabled = !idle || !state.online || attachmentsBusy(session.id);
+  $("composer-text").disabled = !idle || sending;
+  // Attachments can be added while the agent works, ready for the next message — but not mid-send.
+  $("composer-attach").disabled = session.status === "ended" || sending;
+  // Blocked while any attachment is not ready: the attachment-status line (renderAttachments) says why.
+  $("composer-send").disabled = !idle || !state.online || blocked || sending;
   renderAttachments(session);
   const status = $("composer-status");
   const error = state.composerErrors.get(session.id);
   if (!state.online) {
     status.textContent = "You're offline. Your message is kept and can be sent once the connection is back.";
+  } else if (sending) {
+    status.textContent = list.length ? "Sending message and attachments…" : "Sending message…";
   } else if (error) {
     status.textContent = error;
-  } else if (attachmentsBusy(session.id)) {
-    status.textContent = "Uploading attachments…";
   } else if (session.status === "running" || session.status === "needsAttention") {
     status.replaceChildren("Agent is working — ",
       el("button", { type: "button", class: "link", onclick: () => interruptSession(session) }, "Interrupt this turn"));
@@ -1031,91 +1073,343 @@ async function interruptSession(session) {
   } catch (error) { alert(error.message); }
 }
 
-// MARK: attachments — uploaded as soon as they are added, sent as paths with the next message.
+// MARK: attachments — a draft per session, uploaded as soon as they are added and sent by id with the next
+// message. Uploading and sending are separate: a message only clears its attachments once the server has
+// confirmed the send, and the server (not here) adds the attachments' paths to the agent's prompt.
 
 /// What the "+" menu offers, in order. Each kind opens the system picker with its own filter; another kind
 /// (a camera shortcut, a project file picker…) is one more entry here plus its handling in pickAttachment.
 const ATTACH_KINDS = [
-  { id: "image", label: "Photo or image", icon: "photo", accept: "image/*" },
-  { id: "file", label: "File", icon: "file", accept: "" },
+  { id: "image", label: "Photo or image", description: "Choose images, several at once", icon: "photo", accept: "image/*" },
+  { id: "file", label: "File", description: "Choose a file from this device", icon: "file", accept: "" },
 ];
 
 function attachmentsFor(sessionId) { return state.attachments.get(sessionId) ?? []; }
-function attachmentsBusy(sessionId) { return attachmentsFor(sessionId).some((a) => a.uploading); }
-
-function addFiles(session, files) {
-  if (!files.length) return;
-  const list = attachmentsFor(session.id);
-  state.attachments.set(session.id, list);
-  for (const file of files) {
-    const image = file.type.startsWith("image/");
-    const attachment = { key: crypto.randomUUID(), name: file.name || (image ? "image" : "file"), size: file.size,
-                         preview: image ? URL.createObjectURL(file) : null, uploading: true, path: null, error: null };
-    list.push(attachment);
-    uploadFile(session.id, file)
-      .then((path) => { attachment.path = path; })
-      .catch((error) => { attachment.error = error.message; })
-      .finally(() => { attachment.uploading = false; if (state.selectedId === session.id) renderComposer(session); });
-  }
-  renderComposer(session);
-}
-
-function removeAttachment(session, key) {
-  const list = attachmentsFor(session.id);
-  const index = list.findIndex((a) => a.key === key);
-  if (index < 0) return;
-  if (list[index].preview) URL.revokeObjectURL(list[index].preview);
-  list.splice(index, 1);
-  renderComposer(session);
-}
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/// Images as thumbnails; any other file as a card with its name and size.
-function renderAttachments(session) {
-  const list = attachmentsFor(session.id);
-  $("composer-attachments").hidden = !list.length;
-  $("composer-attachments").replaceChildren(...list.map((a) => el("div", {
-    class: "attachment" + (a.preview ? "" : " file") + (a.error ? " failed" : a.uploading ? " uploading" : ""),
-    title: a.error ? `${a.name}: ${a.error}` : a.name,
-  },
-    a.preview ? el("img", { src: a.preview, alt: a.name })
-      : el("div", { class: "attachment-file" }, icon("file"),
-          el("div", { class: "attachment-file-text" }, el("span", { class: "attachment-name" }, a.name),
-            el("span", { class: "attachment-size" }, formatBytes(a.size)))),
-    a.uploading ? el("span", { class: "attachment-state" }, "Uploading…") : null,
-    a.error ? el("span", { class: "attachment-state" }, "Failed") : null,
-    el("button", { type: "button", class: "attachment-remove", "aria-label": `Remove ${a.name}`,
-                   onclick: () => removeAttachment(session, a.key) }, icon("x")))));
+/// The extension if the name has a short one, else a generic label — never the raw name or a bare mime type.
+function attachmentTypeLabel(name, image) {
+  const ext = name.includes(".") ? name.split(".").pop() : "";
+  return ext && ext.length <= 8 ? ext.toUpperCase() : (image ? "Image" : "File");
 }
 
+/// Where the browser previews or downloads an uploaded attachment; the token goes in the query because an
+/// <img> or <a> cannot send an Authorization header.
+function attachmentUrl(attachment) { return `${attachment.url}?token=${encodeURIComponent(state.token)}`; }
+
+function addFiles(session, files) {
+  if (!files.length || state.sending.has(session.id)) return;
+  const list = attachmentsFor(session.id);
+  state.attachments.set(session.id, list);
+  const limit = state.uploadLimits?.maxAttachmentsPerMessage;
+  let incoming = files;
+  if (limit != null) {
+    const room = Math.max(0, limit - list.length);
+    if (files.length > room) {
+      incoming = files.slice(0, room);
+      state.composerErrors.set(session.id, room === 0
+        ? `This message already has the maximum of ${limit} attachments.`
+        : `Only ${room} more fit this message (max ${limit} attachments) — the rest were skipped.`);
+    } else {
+      state.composerErrors.delete(session.id);   // clears a stale over-limit message from an earlier add
+    }
+  }
+  const added = [];
+  for (const file of incoming) {
+    const image = file.type.startsWith("image/");
+    const attachment = { key: crypto.randomUUID(), file, name: file.name || (image ? "image" : "file"),
+      size: file.size, image, localUrl: image ? URL.createObjectURL(file) : null,
+      status: "uploading", progress: 0, error: null, retryable: true, attachment: null, xhr: null };
+    const maxBytes = state.uploadLimits?.maxFileBytes;
+    if (maxBytes != null && file.size > maxBytes) {
+      attachment.status = "failed";
+      attachment.retryable = false;
+      attachment.error = `This file is larger than the ${formatBytes(maxBytes)} limit.`;
+    }
+    list.push(attachment);
+    added.push(attachment);
+  }
+  renderComposer(session);
+  if (added.length) revealAttachment(session, added[added.length - 1].key);
+  for (const attachment of added) if (attachment.status === "uploading") startUpload(session, attachment);
+}
+
+function removeAttachment(session, key) {
+  if (state.sending.has(session.id)) return;
+  const list = attachmentsFor(session.id);
+  const index = list.findIndex((a) => a.key === key);
+  if (index < 0) return;
+  const [attachment] = list.splice(index, 1);
+  attachment.xhr?.abort();
+  if (attachment.localUrl) URL.revokeObjectURL(attachment.localUrl);
+  renderComposer(session);
+  $("composer-attach").focus();
+}
+
+function retryAttachment(session, key) {
+  if (!navigator.onLine || state.sending.has(session.id)) return;
+  const attachment = attachmentsFor(session.id).find((a) => a.key === key);
+  if (attachment) startUpload(session, attachment);
+}
+
+/// Scrolls a just-added or just-failed card into view, so a reason or a retry button is never off-screen.
+function revealAttachment(session, key) {
+  if (state.selectedId !== session.id) return;
+  $("draft-attachments").querySelector(`[data-attachment-key="${key}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+// Uploads are a plain HTTP request, independent of the events WebSocket: gated on the browser's own
+// online/offline signal, not state.online, so a reconnecting events socket never aborts a perfectly
+// good upload (nor leaves one stuck) — see resumeOfflineAttachments()/pauseAttachmentUploads() below.
+function startUpload(session, attachment) {
+  if (!navigator.onLine) {
+    attachment.status = "offline";
+    if (state.selectedId === session.id) renderComposer(session);
+    return;
+  }
+  attachment.status = "uploading";
+  attachment.progress = 0;
+  attachment.error = null;
+  if (state.selectedId === session.id) renderComposer(session);
+  const { xhr, promise } = uploadAttachment(session.id, attachment.file,
+    (percent) => patchAttachmentProgress(session.id, attachment.key, percent));
+  attachment.xhr = xhr;
+  promise.then((json) => {
+    attachment.attachment = json;
+    attachment.status = "ready";
+    attachment.progress = 100;
+    attachment.xhr = null;
+    if (state.selectedId === session.id) renderComposer(session);
+  }).catch((error) => {
+    attachment.status = "failed";
+    attachment.error = error.message;
+    attachment.retryable = error.retryable !== false;
+    attachment.xhr = null;
+    if (state.selectedId === session.id) { renderComposer(session); revealAttachment(session, attachment.key); }
+  });
+}
+
+/// POSTs the file with upload.onprogress, so the card's progress bar can be patched in place (see
+/// patchAttachmentProgress) instead of re-rendering the whole composer on every percent.
+function uploadAttachment(sessionId, file, onProgress) {
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise((resolve, reject) => {
+    xhr.open("POST", `/api/sessions/${sessionId}/files?name=${encodeURIComponent(file.name || "file")}`);
+    xhr.setRequestHeader("Authorization", "Bearer " + state.token);
+    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100)); };
+    xhr.onload = () => {
+      let body = {};
+      try { body = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body);
+      const error = new Error(body.error?.message || xhr.statusText || "Upload failed.");
+      error.retryable = xhr.status !== 413;   // 413 is a size problem retrying cannot fix
+      reject(error);
+    };
+    xhr.onerror = () => reject(new Error("Couldn't reach the server. Check your connection and try again."));
+    xhr.onabort = () => reject(new Error("Upload cancelled."));
+    xhr.send(file);
+  });
+  return { xhr, promise };
+}
+
+/// Only touches this one card's progress bar and label — never re-renders the composer, so the textarea's
+/// value, cursor and focus are untouched while an upload is in flight.
+function patchAttachmentProgress(sessionId, key, percent) {
+  const attachment = attachmentsFor(sessionId).find((a) => a.key === key);
+  if (attachment) attachment.progress = percent;
+  if (state.selectedId !== sessionId) return;
+  const card = $("draft-attachments").querySelector(`[data-attachment-key="${key}"]`);
+  if (!card) return;
+  const bar = card.querySelector(".attachment-progress");
+  if (bar) { bar.setAttribute("aria-valuenow", String(percent)); bar.firstElementChild.style.width = percent + "%"; }
+  const label = card.querySelector(".attachment-state span");
+  if (label) label.textContent = `Uploading ${percent}%`;
+}
+
+// Tied to the browser's own online/offline signal, not state.online (which also reflects the events
+// WebSocket): that socket reconnects independently and can flap right as the network returns, and
+// aborting a plain HTTP upload because of that would just undo an upload that was going through fine.
+window.addEventListener("online", resumeOfflineAttachments);
+window.addEventListener("offline", pauseAttachmentUploads);
+
+function resumeOfflineAttachments() {
+  for (const [sessionId, list] of state.attachments) {
+    const session = state.sessions.get(sessionId);
+    for (const attachment of list) if (session && attachment.status === "offline") startUpload(session, attachment);
+  }
+}
+function pauseAttachmentUploads() {
+  for (const list of state.attachments.values()) for (const attachment of list) if (attachment.status === "uploading") {
+    attachment.xhr?.abort();
+    attachment.xhr = null;
+    attachment.status = "offline";
+  }
+}
+
+/// One line summarizing the whole draft: what is blocking a send, or that everything is ready.
+function attachmentStatusText(session, list) {
+  if (state.sending.has(session.id)) return list.length ? "Sending message and attachments…" : "Sending message…";
+  if (!list.length) return "";
+  if (!navigator.onLine) return "You're offline. Uploads will resume once you're back online; your draft is kept.";
+  const failed = list.filter((a) => a.status === "failed").length;
+  const uploading = list.filter((a) => a.status === "uploading").length;
+  const ready = list.filter((a) => a.status === "ready").length;
+  if (failed) {
+    // Retrying cannot fix a file that is too large, so only offer what can.
+    const action = list.some((a) => a.status === "failed" && a.retryable) ? "retry or remove" : "remove";
+    return `${failed} attachment${failed === 1 ? "" : "s"} failed — ${action} ${failed === 1 ? "it" : "them"} to send.`;
+  }
+  if (uploading) return `Uploading ${uploading} of ${list.length}…`;
+  return `${ready} attachment${ready === 1 ? "" : "s"} uploaded — they'll be sent with your message.`;
+}
+
+function attachmentCardStatusText(a) {
+  if (a.status === "uploading") return `Uploading ${a.progress}%`;
+  if (a.status === "offline") return "Waiting for connection";
+  if (a.status === "failed") return a.error || "Upload failed.";
+  return "Uploaded";
+}
+
+/// A thumbnail with a fallback for an image that cannot be decoded, or a plain file icon.
+function attachmentMedia(a) {
+  if (!a.image) return [el("span", { class: "attachment-file-icon" }, icon("file"))];
+  const fallback = el("span", { class: "attachment-fallback", hidden: true }, icon("photo"));
+  const img = el("img", { src: a.localUrl ?? (a.attachment ? attachmentUrl(a.attachment) : ""), alt: a.name });
+  img.addEventListener("error", () => { img.hidden = true; fallback.hidden = false; });
+  return [img, fallback];
+}
+
+function attachmentCard(session, a, locked) {
+  return el("article", { class: `attachment-card ${a.image ? "is-image" : "is-file"} ${a.status}`,
+                         "data-attachment-key": a.key, role: "listitem" },
+    el("button", { type: "button", class: "attachment-preview", "aria-label": `Preview ${a.name}`, title: a.name,
+                   onclick: () => openAttachmentPreview(draftAttachmentPreview(a)) },
+      attachmentMedia(a),
+      el("span", { class: "attachment-meta" }, el("strong", {}, a.name),
+        el("small", {}, `${attachmentTypeLabel(a.name, a.image)} · ${formatBytes(a.size)}`))),
+    el("button", { type: "button", class: "attachment-remove", "aria-label": `Remove ${a.name}`, disabled: locked,
+                   onclick: () => removeAttachment(session, a.key) }, icon("x")),
+    el("div", { class: "attachment-state" },
+      a.status === "ready" ? icon("check") : null,
+      el("span", {}, attachmentCardStatusText(a)),
+      a.status === "failed" && a.retryable
+        ? el("button", { type: "button", disabled: locked || !navigator.onLine, onclick: () => retryAttachment(session, a.key) },
+            icon("refresh"), "Retry")
+        : null),
+    a.status === "uploading"
+      ? el("div", { class: "attachment-progress", role: "progressbar", "aria-label": `${a.name} upload progress`,
+                    "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(a.progress) },
+          el("div", { style: `width:${a.progress}%` }))
+      : null);
+}
+
+/// The draft list above the textarea, and the one-line summary of where the whole draft stands.
+function renderAttachments(session) {
+  const list = attachmentsFor(session.id);
+  const locked = state.sending.has(session.id);
+  $("draft-attachments").hidden = !list.length;
+  $("draft-attachments").replaceChildren(...list.map((a) => attachmentCard(session, a, locked)));
+  const text = attachmentStatusText(session, list);
+  $("attachment-status").hidden = !text;
+  $("attachment-status").textContent = text;
+}
+
+// MARK: attachment preview — a draft or sent attachment's full-size image, or a file's details and a link.
+
+/// A uniform shape for openAttachmentPreview(), whether the attachment is still a draft or already sent.
+function draftAttachmentPreview(a) {
+  return { name: a.name, size: a.size, image: a.image, url: a.localUrl ?? (a.attachment ? attachmentUrl(a.attachment) : null),
+          downloadUrl: a.attachment ? attachmentUrl(a.attachment) : null };
+}
+function sentAttachmentPreview(attachment) {
+  const image = attachment.type.startsWith("image/");
+  return { name: attachment.name, size: attachment.size, image, url: attachmentUrl(attachment), downloadUrl: attachmentUrl(attachment) };
+}
+
+function openAttachmentPreview(preview) {
+  const dialog = $("attachment-preview-dialog");
+  let body;
+  if (preview.image) {
+    // Upload failure (never gets here) is distinct from a format the browser just cannot decode: that
+    // case keeps the dialog open and swaps in this note instead of failing silently.
+    const fallback = el("p", { hidden: true }, "This format can't be previewed here. Download the file to view it.");
+    const img = el("img", { src: preview.url ?? "", alt: preview.name });
+    img.addEventListener("error", () => { img.hidden = true; fallback.hidden = false; });
+    body = [img, fallback];
+  } else {
+    body = [el("div", { class: "file-preview-summary" }, icon("file"), el("p", {}, `${attachmentTypeLabel(preview.name, false)} file`))];
+  }
+  dialog.replaceChildren(
+    el("div", { class: "attachment-preview-heading" }, el("h2", {}, preview.name),
+      el("button", { type: "button", class: "icon-button", "aria-label": "Close preview", onclick: () => dialog.close() }, icon("x"))),
+    el("div", { class: "attachment-preview-content" }, body),
+    el("div", { class: "attachment-preview-footer" }, el("span", {}, formatBytes(preview.size)),
+      preview.downloadUrl
+        ? el("a", { href: preview.downloadUrl, target: "_blank", rel: "noopener" }, "Open / Download")
+        : el("span", {}, "Not uploaded yet")));
+  dialog.showModal();
+}
+
+/// A sent message's own attachments: thumbnails open the preview; file cards open or download directly.
+function sentAttachments(attachments) {
+  return el("div", { class: "message-attachments", role: "list", "aria-label": "Message attachments" },
+    attachments.map((attachment) => {
+      const image = attachment.type.startsWith("image/");
+      const fallback = el("span", { class: "attachment-fallback", hidden: true }, icon("photo"));
+      const img = image ? el("img", { src: attachmentUrl(attachment), alt: attachment.name }) : null;
+      if (img) img.addEventListener("error", () => { img.hidden = true; fallback.hidden = false; });
+      const media = image ? [img, fallback] : [el("span", { class: "attachment-file-icon" }, icon("file"))];
+      const meta = el("span", { class: "sent-attachment-meta" }, el("strong", {}, attachment.name),
+        el("small", {}, `${attachmentTypeLabel(attachment.name, image)} · ${formatBytes(attachment.size)}`));
+      const card = image
+        ? el("button", { type: "button", class: "sent-attachment is-image", "aria-label": `View ${attachment.name}`,
+                        onclick: () => openAttachmentPreview(sentAttachmentPreview(attachment)) }, media, meta)
+        : el("a", { class: "sent-attachment is-file", href: attachmentUrl(attachment), target: "_blank", rel: "noopener",
+                   "aria-label": `Open ${attachment.name}` }, media, meta);
+      return el("div", { role: "listitem" }, card);
+    }));
+}
+
+// MARK: sending — a stable snapshot of text and ready attachments, cleared only once the server confirms.
+
 async function sendMessage(session) {
+  if (state.sending.has(session.id)) return;   // one send in flight at a time; this also blocks Enter
   const textarea = $("composer-text");
-  const ready = attachmentsFor(session.id).filter((a) => a.path);
-  // The agent attaches an image when its path is in the prompt; the paths go after the text.
-  const text = [textarea.value.trim(), ready.map((a) => a.path).join(" ")].filter(Boolean).join("\n\n");
-  if (!text || textarea.disabled || attachmentsBusy(session.id)) return;
+  const list = attachmentsFor(session.id);
+  if (list.some((a) => a.status !== "ready")) return;
+  const text = textarea.value.trim();
+  const ids = list.map((a) => a.attachment.id);
+  if (!text && !ids.length) return;
   const id = state.pendingMessageIds.get(session.id) ?? crypto.randomUUID();
   state.pendingMessageIds.set(session.id, id);
-  $("composer-send").disabled = true;
+  const keys = new Set(list.map((a) => a.key));
+  state.sending.set(session.id, { text, keys });
+  state.composerErrors.delete(session.id);
+  renderComposer(session);
   try {
-    const receipt = await api("POST", `/api/sessions/${session.id}/messages`, { id, text });
+    const receipt = await api("POST", `/api/sessions/${session.id}/messages`, { id, text, attachments: ids });
     state.messages.set(receipt.id, receipt);
     state.pendingMessageIds.delete(session.id);
+    for (const attachment of attachmentsFor(session.id)) if (keys.has(attachment.key) && attachment.localUrl) {
+      URL.revokeObjectURL(attachment.localUrl);
+    }
+    state.attachments.set(session.id, attachmentsFor(session.id).filter((a) => !keys.has(a.key)));
     textarea.value = "";
     state.composerDrafts.delete(session.id);
-    state.composerErrors.delete(session.id);
     state.interrupted.delete(session.id);
-    attachmentsFor(session.id).forEach((a) => { if (a.preview) URL.revokeObjectURL(a.preview); });
-    state.attachments.delete(session.id);
     autosizeComposer(textarea);
   } catch (error) {
+    // Not confirmed: the text and every attachment (even the ones just sent) stay in the draft, and the
+    // same message id is kept, so retrying never creates a duplicate prompt once the server does confirm.
     state.composerErrors.set(session.id, error.message);
   } finally {
+    state.sending.delete(session.id);
     renderComposer(session);
   }
 }
@@ -1130,24 +1424,47 @@ $("composer").addEventListener("submit", (event) => {
   const session = selected();
   if (session) sendMessage(session);
 });
+
+// MARK: the "+" menu/sheet — a small anchored menu on desktop, a bottom sheet on mobile; same two choices.
+
+let attachMenuButton = null;   // the "+" a desktop menu is currently open for, to return focus to on close
+
+function attachChoiceButtons(onPick, menuRole) {
+  return ATTACH_KINDS.map((kind) => el("button", { type: "button", class: "attach-menu-item", role: menuRole ? "menuitem" : undefined,
+    onclick: () => onPick(kind) }, icon(kind.icon), el("span", {}, el("strong", {}, kind.label), el("small", {}, kind.description))));
+}
+
 /// The "+" menu, shared by the chat composer and the terminal input bar: `onFiles` receives what was picked.
 function openAttachMenu(button, onFiles, { multiple }) {
+  if (isMobile()) return openAttachSheet(button, onFiles, multiple);
   const menu = $("attach-menu");
   if (!menu.hidden && menu.parentElement === button.parentElement) return closeAttachMenu();
-  menu.replaceChildren(...ATTACH_KINDS.map((kind) => el("button", {
-    type: "button", role: "menuitem", class: "attach-menu-item",
-    onclick: () => { closeAttachMenu(); pickAttachment(kind, onFiles, multiple); },
-  }, icon(kind.icon), kind.label)));
+  menu.replaceChildren(...attachChoiceButtons((kind) => { closeAttachMenu(false); pickAttachment(kind, onFiles, multiple); }, true));
   button.parentElement.append(menu);   // positioned against the input's own box, which moves with the keyboard
   menu.hidden = false;
+  attachMenuButton = button;
   button.setAttribute("aria-expanded", "true");
   menu.querySelector("button")?.focus();
 }
 
-function closeAttachMenu() {
+function closeAttachMenu(returnFocus = true) {
   $("attach-menu").hidden = true;
   document.querySelectorAll("[aria-haspopup=menu]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+  if (returnFocus) attachMenuButton?.focus();
+  attachMenuButton = null;
 }
+
+/// The mobile bottom sheet; a native <dialog> handles Esc and restores focus to `button` on its own.
+function openAttachSheet(button, onFiles, multiple) {
+  $("attach-sheet-choices").replaceChildren(
+    ...attachChoiceButtons((kind) => { $("attach-sheet").close(); pickAttachment(kind, onFiles, multiple); }, false));
+  button.setAttribute("aria-expanded", "true");
+  $("attach-sheet").showModal();
+}
+$("attach-sheet").addEventListener("close", () => {
+  document.querySelectorAll("[aria-haspopup=menu]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+});
+$("attach-sheet-close").onclick = () => $("attach-sheet").close();
 
 function pickAttachment(kind, onFiles, multiple) {
   const input = $("attach-input");
@@ -1162,9 +1479,21 @@ function pickAttachment(kind, onFiles, multiple) {
 }
 
 document.addEventListener("click", (event) => {
-  if (!$("attach-menu").hidden && !event.target.closest("#attach-menu, [aria-haspopup=menu]")) closeAttachMenu();
+  if (!$("attach-menu").hidden && !event.target.closest("#attach-menu, [aria-haspopup=menu]")) closeAttachMenu(false);
 });
-document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeAttachMenu(); });
+document.addEventListener("keydown", (event) => {
+  const menu = $("attach-menu");
+  if (menu.hidden) return;
+  if (event.key === "Escape") { event.preventDefault(); closeAttachMenu(); }
+  else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    event.preventDefault();
+    const items = [...menu.querySelectorAll("button")];
+    const index = items.indexOf(document.activeElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+      : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  }
+});
 
 $("composer-attach").onclick = (event) => openAttachMenu(event.currentTarget, (files) => {
   const session = selected();
@@ -1178,8 +1507,12 @@ $("composer-text").addEventListener("paste", (event) => {
   event.preventDefault();
   addFiles(session, files);
 });
-$("composer").addEventListener("dragover", (event) => event.preventDefault());
+$("composer").addEventListener("dragover", (event) => { event.preventDefault(); $("composer").classList.add("is-dragging"); });
+$("composer").addEventListener("dragleave", (event) => {
+  if (!$("composer").contains(event.relatedTarget)) $("composer").classList.remove("is-dragging");
+});
 $("composer").addEventListener("drop", (event) => {
+  $("composer").classList.remove("is-dragging");
   const session = selected();
   if (!session || !event.dataTransfer?.files.length) return;
   event.preventDefault();
@@ -1210,8 +1543,23 @@ $("composer-text").addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.shiftKey || isMobile()) return;
   event.preventDefault();
   const session = selected();
-  if (session) sendMessage(session);
+  // The Send button's own disabled state is the one source of truth for "an attachment isn't ready yet".
+  if (session && !$("composer-send").disabled) sendMessage(session);
 });
+
+// MARK: Terminal's note about the Chat draft — the terminal's own send never includes these attachments.
+
+function renderTerminalAttachmentsNote(session) {
+  const list = attachmentsFor(session.id);
+  $("terminal-attachments-note").hidden = !list.length;
+  if (list.length) {
+    $("terminal-attachments-note-text").textContent = `${list.length} attachment${list.length === 1 ? "" : "s"} in the Chat draft`;
+  }
+}
+$("terminal-attachments-note-view").onclick = () => {
+  const session = selected();
+  if (session) showView(session, "chat");
+};
 
 // MARK: terminal view
 

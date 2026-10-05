@@ -271,49 +271,124 @@ svg { display: block; flex: none; }
 .composer { flex: none; border-top: 1px solid var(--line); padding: 10px 16px 14px; background: var(--bg); }
 .composer-status { color: var(--muted); font-size: 13.5px; margin-bottom: 7px; }
 .composer-status:empty { display: none; }
-.composer-field { display: flex; align-items: flex-end; border: 1px solid #454650; border-radius: 10px; padding: 7px;
-  gap: 6px; background: #222228; }
-.composer-field:focus-within { border-color: var(--accent); }
-.composer-field textarea { flex: 1; min-width: 0; min-height: 36px; max-height: 120px; color: var(--text); border: 0;
-  background: none; resize: none; padding: 7px 5px; outline: none; font-size: 15px; font-family: var(--sans); line-height: 1.4; }
+/* The draft attachments, their status line and the input row all live inside one bordered surface. */
+.composer-surface { position: relative; border: 1px solid #454650; border-radius: 10px; padding: 8px; background: #222228; }
+.composer-surface:focus-within { border-color: var(--accent); }
+.composer-field { display: flex; align-items: flex-end; gap: 6px; padding: 0; border: 0; border-radius: 0; background: none; }
+.composer-field textarea { flex: 1; min-width: 0; min-height: 44px; max-height: 160px; overflow-y: auto; color: var(--text);
+  border: 0; background: none; resize: none; padding: 10px 5px; outline: none; font-size: 15px; font-family: var(--sans);
+  line-height: 1.4; }
 .composer-field button { padding: 7px; border-radius: 7px; background: var(--accent); color: #0a203d; border: none;
   min-height: 0; }
 .composer-field button:disabled { opacity: 0.5; }
 .composer-field button svg { width: 17px; height: 17px; }
-/* The image button sits quietly next to the input; Send stays the one accented button. */
+/* The image button sits quietly next to the input; Send stays the one accented button. Both are full touch targets. */
+.composer-field > button { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
 .composer-field .attach-button, .terminal-send-form .attach-button { background: none; color: var(--muted); }
 .composer-field .attach-button:hover:not(:disabled), .terminal-send-form .attach-button:hover { color: var(--text); }
 .composer-field .attach-button svg, .terminal-send-form .attach-button svg { width: 20px; height: 20px; }
-.composer-attachments { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }
-.attachment { position: relative; flex: none; width: 64px; height: 64px; border-radius: 8px; overflow: hidden;
-  border: 1px solid var(--line); background: var(--raised); }
-.attachment img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.attachment.uploading img { opacity: 0.45; }
-.attachment.failed { border-color: var(--danger, #f38ba8); }
-.attachment.failed img { opacity: 0.3; }
-.attachment-state { position: absolute; left: 0; right: 0; bottom: 0; font-size: 11px; text-align: center;
-  background: rgba(0, 0, 0, 0.6); padding: 2px 0; }
-.attachment-remove { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; min-height: 0; padding: 0;
-  border-radius: 999px; border: none; background: rgba(0, 0, 0, 0.65); color: #fff; display: inline-flex;
-  align-items: center; justify-content: center; }
-.attachment-remove svg { width: 13px; height: 13px; }
-.attachment.file { width: 190px; }
-.attachment-file { display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 30px 0 10px; }
-.attachment-file > svg { width: 22px; height: 22px; flex: none; color: var(--muted); }
-.attachment-file-text { display: flex; flex-direction: column; min-width: 0; }
-.attachment-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attachment-size { font-size: 12px; color: var(--muted); }
-.attachment.file.uploading .attachment-file, .attachment.file.failed .attachment-file { opacity: 0.5; }
-/* The "+" menu opens above the input that holds it. */
+
+/* MARK: draft attachments — the composer's own cards, above the text row; see renderAttachments() in app.js. */
+.draft-attachments { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 7px; scrollbar-width: thin;
+  scrollbar-color: #555560 transparent; overscroll-behavior-x: contain; }
+.attachment-card { position: relative; flex: none; height: 132px; border: 1px solid var(--line); border-radius: 7px;
+  overflow: hidden; background: #292930; }
+.attachment-card.is-image { width: 136px; }
+.attachment-card.is-file { width: 192px; }
+.attachment-preview { display: block; width: 100%; height: 104px; padding: 0; border: none; border-radius: 0;
+  background: none; text-align: left; }
+.attachment-card.is-image .attachment-preview > img { display: block; width: 100%; height: 56px; object-fit: cover; }
+.attachment-card.is-image .attachment-meta { display: block; padding: 5px 9px 0; }
+.attachment-meta strong { display: block; font-size: 11px; font-weight: 500; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.attachment-meta small { display: block; color: var(--muted); font-size: 9px; margin-top: 2px; }
+.attachment-card.is-file .attachment-preview { display: flex; gap: 10px; align-items: flex-start; padding: 18px 40px 10px 10px; }
+.attachment-file-icon { display: grid; place-items: center; flex: none; }
+.attachment-file-icon svg { width: 26px; height: 26px; color: #b1bad0; }
+.attachment-card.is-file .attachment-meta { min-width: 0; padding-top: 1px; }
+.attachment-card.is-file .attachment-meta strong { font-size: 12px; }
+.attachment-fallback { display: grid; place-items: center; height: 64px; background: #202027; margin: 0; }
+.attachment-fallback svg { color: var(--muted); width: 26px; height: 26px; }
+.attachment-card.is-image .attachment-fallback { height: 56px; }
+.attachment-remove { position: absolute; top: 0; right: 0; min-width: 44px; min-height: 44px; padding: 12px;
+  display: grid; place-items: center; color: #e2e6ed; background: #1b1b229c; border-radius: 0 5px 0 6px; border: none; }
+.attachment-remove svg { width: 17px; height: 17px; }
+.attachment-remove:hover { background: #444450; }
+.attachment-remove:disabled { opacity: 0.4; }
+.attachment-state { position: absolute; bottom: 3px; left: 9px; right: 5px; min-height: 24px; display: flex; gap: 4px;
+  align-items: center; color: var(--muted); font-size: 10px; }
+.attachment-state > svg { width: 12px; height: 12px; }
+.attachment-state button { margin-left: auto; min-height: 36px; display: inline-flex; align-items: center; gap: 3px;
+  color: #a8cdff; padding: 4px; font-size: 10px; background: none; border: none; }
+.attachment-state button svg { width: 12px; height: 12px; }
+.attachment-card.ready .attachment-state { color: var(--teal); }
+.attachment-card.failed { border-color: #73424e; }
+.attachment-card.failed .attachment-state { color: var(--error); }
+.attachment-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: #373741; }
+.attachment-progress > div { height: 100%; background: var(--accent); transition: width 0.15s; }
+.attachment-status { color: var(--muted); font-size: 10px; line-height: 1.6; padding: 0 2px 7px; margin: 0; }
+
+/* The "+" menu opens above the input that holds it; its mobile equivalent is the #attach-sheet dialog instead. */
 .composer-field, .terminal-send-form { position: relative; }
-.attach-menu { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 20; min-width: 210px; padding: 6px;
+.attach-menu { position: absolute; left: 0; bottom: calc(100% + 9px); z-index: 20; width: 238px; padding: 6px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
   display: flex; flex-direction: column; }
-/* `.attach-menu` in front: the menu sits inside the input's box, whose plain `button` rule is the accented Send. */
-.attach-menu .attach-menu-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: none;
-  border: none; border-radius: 7px; text-align: left; color: var(--text); font-weight: normal; }
-.attach-menu .attach-menu-item:hover, .attach-menu .attach-menu-item:focus-visible { background: var(--raised); }
-.attach-menu .attach-menu-item svg { width: 18px; height: 18px; color: var(--muted); }
+.attach-menu-item { width: 100%; display: flex; align-items: center; gap: 13px; text-align: left; min-height: 58px;
+  padding: 10px 12px; border-radius: 6px; background: none; border: none; color: var(--text); font-weight: normal; }
+.attach-menu-item:hover, .attach-menu-item:focus-visible { background: var(--raised); }
+.attach-menu-item svg { width: 22px; height: 22px; color: var(--muted); flex: none; }
+.attach-menu-item strong { display: block; font-size: 13px; font-weight: 500; }
+.attach-menu-item small { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }
+dialog.attach-sheet { padding: 0; }
+.attach-sheet-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 15px 17px 9px; }
+.attach-sheet-heading h2 { margin: 0; font-size: 16px; font-weight: 550; }
+.attach-sheet-choices { padding: 0 8px 13px; display: flex; flex-direction: column; }
+.attach-sheet-choices .attach-menu-item { min-height: 68px; padding-left: 14px; }
+@media (max-width: 700px) {
+  /* A bottom sheet instead of a centered dialog, with ~12px margins inside the app viewport. */
+  dialog.attach-sheet { position: fixed; left: 12px; right: 12px; bottom: 12px; top: auto; margin: 0; width: auto;
+    max-width: none; max-height: calc(100dvh - 24px); }
+}
+
+/* MARK: attachment preview — a draft or sent attachment's full-size image, or a file's details. */
+.attachment-preview-dialog { width: min(640px, calc(100vw - 28px)); }
+.attachment-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 15px 17px 9px; }
+.attachment-preview-heading h2 { min-width: 0; margin: 0; font-size: 16px; font-weight: 550; overflow-wrap: anywhere; }
+.attachment-preview-content { padding: 11px 18px; }
+.attachment-preview-content img { display: block; max-width: 100%; max-height: 58dvh; width: auto; margin: auto; object-fit: contain; }
+.attachment-preview-content p { color: var(--muted); font-size: 12px; line-height: 1.8; }
+.file-preview-summary { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--muted); padding: 24px 0; }
+.file-preview-summary svg { width: 32px; height: 32px; }
+.attachment-preview-footer { display: flex; justify-content: space-between; align-items: center; padding: 12px 18px 18px;
+  gap: 12px; font-size: 12px; color: var(--muted); }
+.attachment-preview-footer a { color: var(--accent); text-decoration: none; }
+
+/* MARK: sent attachments — a message's own thumbnails and file cards, from its MessageReceiptJSON. */
+.message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 9px; }
+.sent-attachment { display: block; text-align: left; padding: 0; overflow: hidden; border: 1px solid #48505e;
+  border-radius: 7px; background: #232932; max-width: 100%; color: inherit; text-decoration: none; }
+.sent-attachment.is-image { width: 164px; }
+.sent-attachment.is-image img { display: block; width: 100%; height: 120px; object-fit: cover; }
+.sent-attachment.is-image .attachment-fallback { height: 120px; }
+.sent-attachment-meta { display: block; text-align: left; margin: 0; padding: 8px 10px; }
+.sent-attachment-meta strong { display: block; font-size: 11px; font-weight: 500; color: var(--text); max-width: 150px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sent-attachment-meta small { display: block; font-size: 10px; color: var(--muted); margin-top: 3px; }
+.sent-attachment.is-file { display: flex; align-items: center; gap: 10px; padding: 4px 9px; min-height: 64px; max-width: 100%; }
+
+/* A hint while a file is dragged over the composer; hidden the rest of the time. */
+.attachment-drop-hint { display: none; }
+.is-dragging .composer-surface { border-color: var(--accent); }
+.is-dragging .attachment-drop-hint { position: absolute; inset: 0; z-index: 9; display: flex; align-items: center;
+  justify-content: center; gap: 9px; border-radius: 9px; background: #263854f0; color: #bdd9ff; pointer-events: none;
+  font-size: 13px; }
+.attachment-drop-hint svg { width: 18px; height: 18px; }
+
+/* The note above the terminal input bar, pointing at attachments staged in the Chat composer. */
+.terminal-attachments-note { display: flex; align-items: center; gap: 8px; padding: 6px 2px 8px; font-size: 12.5px;
+  color: var(--muted); }
+.terminal-attachments-note button { background: none; border: none; color: var(--accent); padding: 0; min-height: 0;
+  font-size: 12.5px; }
 
 /* MARK: terminal view */
 .terminal-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }

@@ -343,6 +343,37 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertThrowsError(try second.setReviewed(id: "nope", true))
     }
 
+    func testAttachmentsGoWithTheirMessageAndStayInTheirSession() throws {
+        let manager = try makeManager()
+        let session = try manager.create(projectPath: project)
+        let other = try manager.create(projectPath: project)
+        let output = Output()
+        _ = try XCTUnwrap(manager.session(id: session.id)).process.subscribe { output.append($0) }
+        for id in [session.id, other.id] {
+            try hook(manager, id, ["hook_event_name": "SessionStart", "session_id": .string("c-" + id), "cwd": .string(project)])
+        }
+        XCTAssertTrue(wait { manager.list().allSatisfy { $0.status == "idle" } })
+        let shot = try manager.saveFile(sessionId: session.id, data: Data([1, 2]), filename: "shot.png", contentType: "image/png")
+        let notes = try manager.saveFile(sessionId: session.id, data: Data("n".utf8), filename: "notes.txt", contentType: "")
+        XCTAssertEqual(notes.type, "application/octet-stream")
+
+        XCTAssertThrowsError(try manager.send(sessionId: other.id, messageId: "x", text: "hi", attachmentIds: [shot.id]),
+                             "an attachment cannot travel to another session") {
+            guard case SessionManagerError.unknownAttachment = $0 else { return XCTFail("\($0)") }
+        }
+        let tooMany = Array(repeating: shot.id, count: UploadLimitsJSON.current.maxAttachmentsPerMessage + 1)
+        XCTAssertThrowsError(try manager.send(sessionId: session.id, messageId: "y", text: "", attachmentIds: tooMany))
+
+        // Attachments only, no text: the prompt is their paths, and the receipt keeps them for the browser.
+        let receipt = try manager.send(sessionId: session.id, messageId: "m1", text: "", attachmentIds: [shot.id, notes.id])
+        XCTAssertEqual(receipt.text, "")
+        XCTAssertEqual(receipt.attachments.map(\.name), ["shot.png", "notes.txt"])
+        XCTAssertTrue(wait { output.text.contains(notes.path) }, output.text)
+        try hook(manager, session.id, ["hook_event_name": "UserPromptSubmit", "session_id": .string("c-" + session.id),
+                                       "prompt": .string("[Image #1]\(notes.path)")])
+        XCTAssertTrue(wait { manager.messageReceipts.first { $0.id == "m1" }?.status == "delivered" })
+    }
+
     func testAMessageWithAnImageIsConfirmedByThePromptClaudeReportsForIt() throws {
         XCTAssertEqual(MessageStore.withoutImagePaths("What color?\n\n/data/sessions/S/images/ab12.png /x/y.JPG"), "What color?")
         XCTAssertEqual(MessageStore.withoutImagePaths("/data/sessions/S/images/ab12.webp"), "")

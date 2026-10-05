@@ -74,12 +74,16 @@
         <footer id="decision-footer" class="decision-footer" hidden></footer>
         <form id="composer" class="composer">
           <div id="composer-status" class="composer-status"></div>
-          <div id="composer-attachments" class="composer-attachments" hidden></div>
-          <div class="composer-field">
-            <button id="composer-attach" class="attach-button" type="button" title="Add an attachment" aria-label="Add an attachment"
-                    aria-haspopup="menu" aria-expanded="false"><svg data-icon="plus"></svg></button>
-            <textarea id="composer-text" rows="1" placeholder="Add to this session…"></textarea>
-            <button id="composer-send" type="submit" title="Send"><svg data-icon="arrow-up"></svg></button>
+          <div class="composer-surface">
+            <div id="draft-attachments" class="draft-attachments" role="list" aria-label="Attachments to send" hidden></div>
+            <p id="attachment-status" class="attachment-status" role="status" aria-live="polite" hidden></p>
+            <div class="composer-field">
+              <button id="composer-attach" class="attach-button" type="button" title="Add an attachment" aria-label="Add an attachment"
+                      aria-haspopup="menu" aria-expanded="false"><svg data-icon="plus"></svg></button>
+              <textarea id="composer-text" rows="1" placeholder="Add to this session…" aria-describedby="attachment-status"></textarea>
+              <button id="composer-send" type="submit" title="Send" aria-label="Send"><svg data-icon="arrow-up"></svg></button>
+            </div>
+            <div class="attachment-drop-hint" aria-hidden="true"><svg data-icon="plus"></svg>Drop to add attachments</div>
           </div>
         </form>
       </div>
@@ -89,6 +93,10 @@
           <div id="terminal-empty" class="terminal-empty">No session</div>
         </div>
         <div id="terminal-inputbar" class="terminal-inputbar">
+          <div id="terminal-attachments-note" class="terminal-attachments-note" hidden>
+            <span id="terminal-attachments-note-text"></span>
+            <button type="button" id="terminal-attachments-note-view">View</button>
+          </div>
           <form id="terminal-send-form" class="terminal-send-form">
             <button id="terminal-attach" class="attach-button" type="button" title="Add an attachment" aria-label="Add an attachment"
                     aria-haspopup="menu" aria-expanded="false"><svg data-icon="plus"></svg></button>
@@ -167,6 +175,20 @@
   <!-- The "+" menu, moved next to whichever input opened it; its items come from ATTACH_KINDS in app.js. -->
   <div id="attach-menu" class="attach-menu" role="menu" hidden></div>
   <input id="attach-input" type="file" hidden>
+
+  <!-- The "+" menu's mobile equivalent: a bottom sheet, since there is no room to anchor a dropdown there. -->
+  <dialog id="attach-sheet" class="dialog attach-sheet" aria-labelledby="attach-sheet-title">
+    <div class="attach-sheet-heading">
+      <h2 id="attach-sheet-title">Add attachment</h2>
+      <button type="button" id="attach-sheet-close" class="icon-button" aria-label="Close">
+        <svg data-icon="x"></svg>
+      </button>
+    </div>
+    <div id="attach-sheet-choices" class="attach-sheet-choices"></div>
+  </dialog>
+
+  <!-- A draft or sent attachment's full-size image or file summary; built in openAttachmentPreview(). -->
+  <dialog id="attachment-preview-dialog" class="dialog attachment-preview-dialog"></dialog>
 
   <script src="vendor/xterm.js"></script>
   <script src="vendor/addon-fit.js"></script>

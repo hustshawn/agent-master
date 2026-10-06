@@ -447,7 +447,10 @@ dialog.attach-sheet { padding: 0; }
 /* MARK: terminal view */
 .terminal-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .terminals { flex: 1; position: relative; min-height: 0; }
-.term-pane { position: absolute; inset: 0; padding: 6px 0 0 14px; background: var(--bg); }
+/* content-box: xterm's fit addon sizes the terminal from this element's computed height, which with
+   border-box would include the padding and give it one row too many, cut off at the bottom. The bottom
+   padding keeps the last line (the agent's status line) off the window's edge. */
+.term-pane { position: absolute; inset: 0; box-sizing: content-box; padding: 6px 0 10px 14px; background: var(--bg); }
 .term-pane .xterm, .term-pane .xterm-viewport { background-color: var(--bg) !important; }
 .term-pane .xterm { height: 100%; }
 .terminal-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--faint);

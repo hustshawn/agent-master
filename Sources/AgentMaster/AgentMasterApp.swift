@@ -47,6 +47,7 @@ struct AgentMasterApp: App {
                     if let hotkey = hotkeys.hotkey(for: AppHotkeys.newAgentSession(agent)) {
                         Button("New \(agent.displayName) Session") { delegate.model.newSessionInCurrentProject(agent: agent) }
                             .keyboardShortcut(hotkey.keyboardShortcut)
+                            .disabled(!delegate.model.isInstalled(agent))
                     }
                 }
             }

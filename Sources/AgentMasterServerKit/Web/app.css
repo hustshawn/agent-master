@@ -192,6 +192,15 @@ svg { display: block; flex: none; }
   padding: 10px 14px; font-size: 15px; color: var(--text); }
 .session-menu button:hover { background: var(--raised); }
 .session-menu button.danger { color: #ffb0bc; }
+.row-menu { position: fixed; top: 0; right: auto; margin-top: 0; z-index: 30; }
+/* A long-press opens the row menu, so iOS must not select the text or show its own callout. */
+.session-row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+#row-sheet-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-sheet-choices { padding: 0 8px 13px; display: flex; flex-direction: column; }
+.row-sheet-choices button { width: 100%; min-height: 52px; text-align: left; padding: 0 14px; font-size: 17px;
+  background: none; border: none; border-radius: 9px; color: var(--text); }
+.row-sheet-choices button:hover, .row-sheet-choices button:focus-visible { background: var(--raised); }
+.row-sheet-choices button.danger { color: #ffb0bc; }
 
 .detail-summary { padding: 16px 20px 14px; border-bottom: 1px solid var(--line); flex: none; }
 .detail-summary .session-meta-line { justify-content: flex-start; }

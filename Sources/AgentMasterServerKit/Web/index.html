@@ -193,6 +193,18 @@
     <div id="attach-sheet-choices" class="attach-sheet-choices"></div>
   </dialog>
 
+  <!-- A session row's menu: right-click opens #row-menu at the pointer, a touch long-press opens #row-sheet. -->
+  <div id="row-menu" class="session-menu row-menu" role="menu" hidden></div>
+  <dialog id="row-sheet" class="dialog attach-sheet row-sheet" aria-labelledby="row-sheet-title">
+    <div class="attach-sheet-heading">
+      <h2 id="row-sheet-title"></h2>
+      <button type="button" id="row-sheet-close" class="icon-button" aria-label="Close">
+        <svg data-icon="x"></svg>
+      </button>
+    </div>
+    <div id="row-sheet-choices" class="row-sheet-choices"></div>
+  </dialog>
+
   <!-- A draft or sent attachment's full-size image or file summary; built in openAttachmentPreview(). -->
   <dialog id="attachment-preview-dialog" class="dialog attachment-preview-dialog"></dialog>
 

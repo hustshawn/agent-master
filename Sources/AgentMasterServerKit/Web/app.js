@@ -446,15 +446,85 @@ function sessionRow(session, { showStatus = false } = {}) {
   const agent = agentFor(session);
   const current = session.id === state.selectedId;
   const preview = showStatus ? `${PHASE_LABEL[sessionPhase(session)]} · ${session.subtitle}` : session.subtitle;
-  return el("button", { class: "session-row" + (current ? " selected" : ""), type: "button",
-                        "aria-current": current ? "true" : null, onclick: () => select(session.id) },
+  const row = el("button", { class: "session-row" + (current ? " selected" : ""), type: "button",
+                        "aria-current": current ? "true" : null, onclick: (e) => {
+                          if (row.dataset.longPressed) { delete row.dataset.longPressed; e.preventDefault(); return; }
+                          select(session.id);
+                        } },
     el("span", { class: "session-row-icon" }, agent ? glyphSVG(agent.glyph, 20) : el("span")),
     el("div", { class: "session-row-body" },
       el("span", { class: "session-title-text" }, displayTitle(session)),
       el("span", { class: "session-row-sub" }, el("span", {}, session.projectName), el("span", {}, relativeTime(session.lastActivityAt))),
       el("span", { class: "session-preview" }, preview)),
     icon("chevron-right"));
+  attachRowMenu(row, session.id);
+  return row;
 }
+
+// MARK: session row menu — right-click opens it at the pointer; a touch long-press opens it as a sheet.
+
+const LONG_PRESS_MS = 500;
+
+function attachRowMenu(row, id) {
+  let timer = null, startX = 0, startY = 0, touch = false;
+  const cancel = () => { clearTimeout(timer); timer = null; };
+  row.addEventListener("pointerdown", (e) => {
+    delete row.dataset.longPressed;   // not every browser follows a long-press with a click to swallow
+    touch = e.pointerType !== "mouse";
+    if (!touch) return;
+    startX = e.clientX; startY = e.clientY;
+    timer = setTimeout(() => { timer = null; row.dataset.longPressed = "1"; openRowSheet(id); }, LONG_PRESS_MS);
+  });
+  row.addEventListener("pointermove", (e) => {
+    if (timer && Math.hypot(e.clientX - startX, e.clientY - startY) > 10) cancel();
+  });
+  row.addEventListener("pointerup", cancel);
+  row.addEventListener("pointercancel", cancel);
+  row.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (!touch) openRowMenu(id, e.clientX, e.clientY);   // a touch long-press is handled by the timer above
+  });
+}
+
+function rowMenuItems(id, done) {
+  const run = (action) => () => { done(); const session = state.sessions.get(id); if (session) action(session); };
+  return [
+    el("button", { type: "button", role: "menuitem", onclick: run(renameFromRow) }, "Rename"),
+    el("button", { type: "button", role: "menuitem", class: "danger", onclick: run(closeSession) }, "Close session"),
+  ];
+}
+
+/// Rename reuses the detail header's inline editor, so the session is opened first.
+function renameFromRow(session) {
+  select(session.id);
+  state.renamingSelected = session.id;
+  renderDetailSummary(session);
+}
+
+function openRowMenu(id, x, y) {
+  const menu = $("row-menu");
+  menu.replaceChildren(...rowMenuItems(id, closeRowMenu));
+  menu.hidden = false;
+  const { width, height } = menu.getBoundingClientRect();
+  menu.style.left = Math.min(x, innerWidth - width - 8) + "px";
+  menu.style.top = Math.min(y, innerHeight - height - 8) + "px";
+  menu.querySelector("button").focus();
+}
+
+function closeRowMenu() { $("row-menu").hidden = true; }
+
+function openRowSheet(id) {
+  const session = state.sessions.get(id);
+  if (!session) return;
+  $("row-sheet-title").textContent = displayTitle(session);
+  $("row-sheet-choices").replaceChildren(...rowMenuItems(id, () => $("row-sheet").close()));
+  $("row-sheet").showModal();
+}
+$("row-sheet-close").onclick = () => $("row-sheet").close();
+document.addEventListener("click", (e) => { if (!$("row-menu").hidden && !e.target.closest("#row-menu")) closeRowMenu(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("row-menu").hidden) closeRowMenu(); });
+window.addEventListener("blur", closeRowMenu);
+document.addEventListener("scroll", closeRowMenu, true);
 
 function renderList() {
   const needsYouCount = phaseCount("needsAttention");

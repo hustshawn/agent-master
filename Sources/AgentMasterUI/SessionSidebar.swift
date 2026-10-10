@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import AgentMasterCore
 
 public struct SessionRowModel: Identifiable, Equatable {
@@ -106,6 +107,23 @@ public enum SessionGrouping {
     }
 }
 
+/// ⌘1…⌘8 pick the first eight visible rows and ⌘9 the last one, like browser tabs.
+public enum SessionShortcuts {
+    /// The digit shown on each row. With more than nine rows, those past the eighth have none except the last.
+    public static func digits(for visibleIds: [String]) -> [String: Int] {
+        var digits: [String: Int] = [:]
+        for (index, id) in visibleIds.prefix(visibleIds.count > 9 ? 8 : 9).enumerated() { digits[id] = index + 1 }
+        if visibleIds.count > 9, let last = visibleIds.last { digits[last] = 9 }
+        return digits
+    }
+
+    public static func id(for digit: Int, in visibleIds: [String]) -> String? {
+        guard (1...9).contains(digit), !visibleIds.isEmpty else { return nil }
+        if digit == 9 { return visibleIds.last }
+        return digit <= visibleIds.count ? visibleIds[digit - 1] : nil
+    }
+}
+
 public struct SessionSidebar: View {
     let rows: [SessionRowModel]
     @Binding var selection: String?
@@ -114,20 +132,30 @@ public struct SessionSidebar: View {
     let onClose: (String) -> Void
     let onRename: (String, String) -> Void
     let onSummarize: (String) -> Void
+    /// What is held with 1…9 to pick a row; ⌘ unless changed in Settings.
+    let switchModifiers: Hotkey
     /// Project paths whose rows are hidden; kept for this run only.
     @State private var collapsed: Set<String> = []
     @State private var rename = RenameState()
+    /// Read by the key monitor, which outlives any one body evaluation, so kept as state.
+    @State private var visibleIds: [String] = []
+    @State private var currentSwitchModifiers = HotkeyMap.defaultSwitchModifiers
+    @State private var showsShortcuts = false
+    @State private var keyMonitor: Any?
+    @State private var hintDelay: Task<Void, Never>?
 
     public init(rows: [SessionRowModel], selection: Binding<String?>,
                 onNewSession: @escaping (String?) -> Void,
                 onClose: @escaping (String) -> Void, onRename: @escaping (String, String) -> Void,
-                onSummarize: @escaping (String) -> Void = { _ in }) {
+                onSummarize: @escaping (String) -> Void = { _ in },
+                switchModifiers: Hotkey = HotkeyMap.defaultSwitchModifiers) {
         self.rows = rows
         self._selection = selection
         self.onNewSession = onNewSession
         self.onClose = onClose
         self.onRename = onRename
         self.onSummarize = onSummarize
+        self.switchModifiers = switchModifiers
     }
 
     public var body: some View {
@@ -158,6 +186,53 @@ public struct SessionSidebar: View {
             .padding(6)
         }
         .background(Palette.bg)
+        .onChange(of: SessionGrouping.group(rows).filter { !collapsed.contains($0.id) }.flatMap { $0.rows.map(\.id) },
+                  initial: true) { _, ids in visibleIds = ids }
+        .onChange(of: switchModifiers, initial: true) { _, modifiers in currentSwitchModifiers = modifiers }
+        .onAppear(perform: startKeyMonitor)
+        .onDisappear(perform: stopKeyMonitor)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+            setShortcutHints(false)   // ⌘-Tab away: the ⌘ release goes to the other app
+        }
+    }
+
+    /// ⌘1…⌘9 select a visible row from anywhere in the main window, the terminal included; holding ⌘ alone
+    /// shows each row's digit after a short delay, so quick ⌘C/⌘V presses don't flash the badges. ⌘ stands for
+    /// whatever modifiers Settings picked.
+    private func startKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { event in
+            // SwiftUI names the main `Window(id: "main")` frame after its id; Settings is left alone.
+            guard event.window?.frameAutosaveName == "main" else { return event }
+            let held = currentSwitchModifiers.matches(event.modifierFlags)
+            if event.type == .flagsChanged {
+                setShortcutHints(held)
+                return event
+            }
+            setShortcutHints(false)
+            if held, let digit = Int(event.characters(byApplyingModifiers: []) ?? ""),
+               let id = SessionShortcuts.id(for: digit, in: visibleIds) {
+                selection = id
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func stopKeyMonitor() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+        setShortcutHints(false)
+    }
+
+    private func setShortcutHints(_ show: Bool) {
+        hintDelay?.cancel()
+        hintDelay = nil
+        guard show else { showsShortcuts = false; return }
+        hintDelay = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            if !Task.isCancelled { showsShortcuts = true }
+        }
     }
 
     private func groupHeader(_ group: SessionGroup) -> some View {
@@ -191,6 +266,8 @@ public struct SessionSidebar: View {
         let editing = rename.editingId == row.id
         // While a row is a text field its own clicks belong to the field, not to select or rename.
         return SessionRow(row: row, selected: row.id == selection, editing: editing, draft: $rename.draft,
+                          shortcut: showsShortcuts ? SessionShortcuts.digits(for: visibleIds)[row.id]
+                              .map { currentSwitchModifiers.symbols + "\($0)" } : nil,
                           onClose: { onClose(row.id) },
                           onCommit: { commitRename(row.id) },
                           onCancel: { rename.cancel() })
@@ -217,6 +294,8 @@ struct SessionRow: View {
     let selected: Bool
     let editing: Bool
     @Binding var draft: String
+    /// Shown in place of the close button while ⌘ is held.
+    let shortcut: String?
     let onClose: () -> Void
     let onCommit: () -> Void
     let onCancel: () -> Void
@@ -244,7 +323,12 @@ struct SessionRow: View {
                 }
             }
             Spacer(minLength: 0)
-            if hovering && !editing {
+            if let shortcut {
+                Text(shortcut).font(MuseFont.small)
+                    .foregroundStyle(selected ? Palette.text : Palette.muted)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .overlay(Capsule().stroke(selected ? Palette.text.opacity(0.6) : Palette.faint, lineWidth: 1))
+            } else if hovering && !editing {
                 // Only there on hover, so a resting row gives its whole width to the title.
                 Button(action: onClose) {
                     Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.muted)

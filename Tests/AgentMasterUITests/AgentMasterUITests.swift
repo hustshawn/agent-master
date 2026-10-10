@@ -52,6 +52,71 @@ final class AgentMasterUITests: XCTestCase {
         XCTAssertEqual(SessionGrouping.selectionAfterClosing("zz", in: rows), "a3", "unknown id falls back to the first row")
     }
 
+    func testHotkeyMapFallsBackToDefaultsAndRoundTrips() {
+        let new = HotkeyAction(id: "new", title: "New", defaultHotkey: Hotkey("n"))
+        let agent = HotkeyAction(id: "agent", title: "Agent", defaultHotkey: nil)
+        var map = HotkeyMap()
+        XCTAssertEqual(map.hotkey(for: new), Hotkey("n"))
+        XCTAssertNil(map.hotkey(for: agent))
+        XCTAssertEqual(map.switchModifiers, Hotkey(""))
+
+        map.set(Hotkey("t", control: true), for: "agent")
+        map.set(nil, for: "new")
+        map.set(Hotkey("", command: false, control: true), for: HotkeyMap.switchSessionId)
+        let restored = HotkeyMap(rawValue: map.rawValue)
+        XCTAssertEqual(restored, map)
+        XCTAssertNil(restored?.hotkey(for: new), "a removed shortcut stays removed")
+        XCTAssertEqual(restored?.hotkey(for: agent)?.symbols, "⌃⌘T")
+        XCTAssertEqual(restored?.switchModifiers.symbols, "⌃")
+
+        map.reset("new")
+        XCTAssertEqual(map.hotkey(for: new), Hotkey("n"))
+        XCTAssertFalse(map.isCustomized("new"))
+        XCTAssertNil(HotkeyMap(rawValue: "not json"))
+    }
+
+    func testHotkeyProblemsRejectClashesAndReservedKeys() {
+        let actions = [HotkeyAction(id: "new", title: "New Session", defaultHotkey: Hotkey("n")),
+                       HotkeyAction(id: "close", title: "Close Session", defaultHotkey: Hotkey("w")),
+                       HotkeyAction(id: "inspector", title: "Inspector", defaultHotkey: Hotkey("0", option: true))]
+        let map = HotkeyMap()
+        XCTAssertNil(map.problem(with: Hotkey("n"), for: "new", among: actions), "keeping its own shortcut is fine")
+        XCTAssertNil(map.problem(with: Hotkey("k", shift: true), for: "new", among: actions))
+        XCTAssertEqual(map.problem(with: Hotkey("w"), for: "new", among: actions), "⌘W is already used by Close Session")
+        XCTAssertEqual(map.problem(with: Hotkey("q"), for: "new", among: actions), "⌘Q is macOS’s Quit")
+        XCTAssertEqual(map.problem(with: Hotkey("3"), for: "new", among: actions), "⌘3 switches sessions")
+        XCTAssertNil(map.problem(with: Hotkey("3", option: true), for: "new", among: actions))
+        XCTAssertEqual(map.problem(with: Hotkey("n", command: false, shift: true), for: "new", among: actions),
+                       "Include ⌘, ⌃ or ⌥")
+
+        var digits = map
+        digits.set(Hotkey("2", option: true), for: "close")
+        XCTAssertEqual(digits.problem(with: Hotkey("", option: true), for: HotkeyMap.switchSessionId, among: actions),
+                       "⌥⌘1…9 would take Close Session’s shortcut")
+        XCTAssertNil(digits.problem(with: Hotkey("", command: false, control: true),
+                                    for: HotkeyMap.switchSessionId, among: actions),
+                     "⌥⌘0 is not one of the digits")
+    }
+
+    func testCommandDigitsPickTheFirstEightRowsAndNineTheLast() {
+        let ten = (1...10).map { "s\($0)" }
+        let digits = SessionShortcuts.digits(for: ten)
+        XCTAssertEqual(digits["s1"], 1)
+        XCTAssertEqual(digits["s8"], 8)
+        XCTAssertNil(digits["s9"], "the ninth row has no digit when there are more")
+        XCTAssertEqual(digits["s10"], 9)
+        XCTAssertEqual(SessionShortcuts.id(for: 9, in: ten), "s10")
+        XCTAssertEqual(SessionShortcuts.id(for: 3, in: ten), "s3")
+
+        let two = ["a", "b"]
+        XCTAssertEqual(SessionShortcuts.digits(for: two), ["a": 1, "b": 2], "nine or fewer rows are numbered in order")
+        XCTAssertNil(SessionShortcuts.id(for: 3, in: two))
+        XCTAssertEqual(SessionShortcuts.id(for: 9, in: two), "b", "⌘9 still picks the last row")
+        let nine = (1...9).map { "n\($0)" }
+        XCTAssertEqual(SessionShortcuts.digits(for: nine)["n9"], 9)
+        XCTAssertNil(SessionShortcuts.id(for: 1, in: []))
+    }
+
     func testSessionSubtitleSummarisesStatus() {
         var state = SessionState()
         XCTAssertEqual(SessionSubtitle.text(for: state), "starting")

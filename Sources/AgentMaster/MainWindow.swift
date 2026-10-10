@@ -5,6 +5,7 @@ import TerminalKit
 struct MainWindow: View {
     @Bindable var model: AppModel
     @AppStorage(InspectorSettings.collapsedKey) private var inspectorCollapsed = InspectorSettings.collapsedByDefault
+    @AppStorage(HotkeyMap.storageKey) private var hotkeys = HotkeyMap()
 
     var body: some View {
         HSplitView {
@@ -12,7 +13,8 @@ struct MainWindow: View {
                            onNewSession: { model.showNewSession(project: $0) },
                            onClose: { model.close($0) },
                            onRename: { model.rename($0, to: $1) },
-                           onSummarize: { model.summarize($0) })
+                           onSummarize: { model.summarize($0) },
+                           switchModifiers: hotkeys.switchModifiers)
             .frame(minWidth: 180, idealWidth: 240, maxWidth: 360)
 
             if let session = model.selected {

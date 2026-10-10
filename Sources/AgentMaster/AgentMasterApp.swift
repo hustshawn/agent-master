@@ -20,20 +20,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-extension AgentShortcut {
-    var modifiers: EventModifiers {
-        var modifiers: EventModifiers = .command
-        if option { modifiers.insert(.option) }
-        if shift { modifiers.insert(.shift) }
-        if control { modifiers.insert(.control) }
-        return modifiers
-    }
-}
-
 @main
 struct AgentMasterApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @AppStorage(InspectorSettings.collapsedKey) private var inspectorCollapsed = InspectorSettings.collapsedByDefault
+    @AppStorage(HotkeyMap.storageKey) private var hotkeys = HotkeyMap()
 
     var body: some Scene {
         // A single Window, not a WindowGroup: there is one terminal NSView per session, and a second
@@ -47,23 +38,23 @@ struct AgentMasterApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Session") { delegate.model.newSessionInCurrentProject() }
-                    .keyboardShortcut("n")
+                    .keyboardShortcut(hotkeys.hotkey(for: AppHotkeys.newSession)?.keyboardShortcut)
                 Button("New Session in Folder…") { delegate.model.chooseProjectAndStart() }
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
-                // Agents that declare a shortcut get their own menu item, which skips the new-session panel.
+                    .keyboardShortcut(hotkeys.hotkey(for: AppHotkeys.newSessionInFolder)?.keyboardShortcut)
+                // Agents with a shortcut get their own menu item, which skips the new-session panel.
                 ForEach(AgentRegistry.all.indices, id: \.self) { index in
                     let agent = AgentRegistry.all[index]
-                    if let shortcut = agent.shortcut {
+                    if let hotkey = hotkeys.hotkey(for: AppHotkeys.newAgentSession(agent)) {
                         Button("New \(agent.displayName) Session") { delegate.model.newSessionInCurrentProject(agent: agent) }
-                            .keyboardShortcut(KeyEquivalent(shortcut.key), modifiers: shortcut.modifiers)
+                            .keyboardShortcut(hotkey.keyboardShortcut)
                     }
                 }
             }
             CommandGroup(after: .sidebar) {
                 Button(inspectorCollapsed ? "Show Inspector" : "Hide Inspector") { inspectorCollapsed.toggle() }
-                    .keyboardShortcut("0", modifiers: [.command, .option])
+                    .keyboardShortcut(hotkeys.hotkey(for: AppHotkeys.toggleInspector)?.keyboardShortcut)
                 Button("Summarize Session") { delegate.model.selectedId.map(delegate.model.summarize) }
-                    .keyboardShortcut("s", modifiers: [.command, .option])
+                    .keyboardShortcut(hotkeys.hotkey(for: AppHotkeys.summarize)?.keyboardShortcut)
                     .disabled(delegate.model.selectedId == nil)
             }
             CommandGroup(replacing: .saveItem) {
@@ -73,7 +64,7 @@ struct AgentMasterApp: App {
                     let inMain = NSApp.keyWindow?.frameAutosaveName == "main"
                     if !(inMain && delegate.model.closeSelected()) { NSApp.keyWindow?.performClose(nil) }
                 }
-                .keyboardShortcut("w")
+                .keyboardShortcut(hotkeys.hotkey(for: AppHotkeys.closeSession)?.keyboardShortcut)
             }
         }
 

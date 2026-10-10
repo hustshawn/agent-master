@@ -98,6 +98,11 @@ final class AgentMasterUITests: XCTestCase {
                      "⌥⌘0 is not one of the digits")
     }
 
+    func testHotkeyHelpNamesTheCurrentShortcut() {
+        XCTAssertEqual(Hotkey.help("Show inspector", Hotkey("i", control: true)), "Show inspector (⌃⌘I)")
+        XCTAssertEqual(Hotkey.help("Show inspector", nil), "Show inspector", "a removed shortcut isn't shown")
+    }
+
     func testCommandDigitsPickTheFirstEightRowsAndNineTheLast() {
         let ten = (1...10).map { "s\($0)" }
         let digits = SessionShortcuts.digits(for: ten)

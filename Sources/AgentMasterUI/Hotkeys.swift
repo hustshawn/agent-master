@@ -25,6 +25,11 @@ public struct Hotkey: Equatable, Hashable, Codable, Sendable {
         (control ? "⌃" : "") + (option ? "⌥" : "") + (shift ? "⇧" : "") + (command ? "⌘" : "") + key.uppercased()
     }
 
+    /// A tooltip naming the action's current shortcut, `Show inspector (⌥⌘0)`, or just the text when it has none.
+    public static func help(_ text: String, _ hotkey: Hotkey?) -> String {
+        hotkey.map { "\(text) (\($0.symbols))" } ?? text
+    }
+
     public var eventModifiers: EventModifiers {
         var modifiers: EventModifiers = []
         if command { modifiers.insert(.command) }

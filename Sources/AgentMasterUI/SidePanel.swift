@@ -26,11 +26,14 @@ public struct PanelSummary: Equatable {
 public struct SidePanel: View {
     let state: SessionState
     let report: SummaryState
+    let summarizeShortcut: Hotkey?
     let onSummarize: () -> Void
 
-    public init(state: SessionState, report: SummaryState = .none, onSummarize: @escaping () -> Void = {}) {
+    public init(state: SessionState, report: SummaryState = .none, summarizeShortcut: Hotkey? = nil,
+                onSummarize: @escaping () -> Void = {}) {
         self.state = state
         self.report = report
+        self.summarizeShortcut = summarizeShortcut
         self.onSummarize = onSummarize
     }
 
@@ -45,7 +48,7 @@ public struct SidePanel: View {
                         Spacer()
                         Button("Summarize", action: onSummarize)
                             .buttonStyle(OutlineButtonStyle())
-                            .help("Summarize and review this session (⌥⌘S)")
+                            .help(Hotkey.help("Summarize and review this session", summarizeShortcut))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -70,10 +73,12 @@ public struct SidePanel: View {
 /// The collapsed inspector: a narrow strip of counts; clicking anywhere expands it again.
 public struct InspectorRail: View {
     let summary: PanelSummary
+    let shortcut: Hotkey?
     let onExpand: () -> Void
 
-    public init(summary: PanelSummary, onExpand: @escaping () -> Void) {
+    public init(summary: PanelSummary, shortcut: Hotkey?, onExpand: @escaping () -> Void) {
         self.summary = summary
+        self.shortcut = shortcut
         self.onExpand = onExpand
     }
 
@@ -96,7 +101,7 @@ public struct InspectorRail: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Show inspector (⌥⌘0)")
+        .help(Hotkey.help("Show inspector", shortcut))
         .background(Palette.bg)
     }
 

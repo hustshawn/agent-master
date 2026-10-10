@@ -23,6 +23,7 @@ struct MainWindow: View {
                                   usage: session.state.usage, mode: session.state.permissionMode,
                                   needsAttention: session.state.status == .needsAttention,
                                   inspectorCollapsed: inspectorCollapsed,
+                                  inspectorShortcut: hotkeys.hotkey(for: AppHotkeys.toggleInspector),
                                   onToggleInspector: { inspectorCollapsed.toggle() })
                     TerminalHost(session: session.terminal)
                         .id(session.id)
@@ -30,17 +31,21 @@ struct MainWindow: View {
                 .frame(minWidth: 520)
 
                 if inspectorCollapsed {
-                    InspectorRail(summary: PanelSummary(state: session.state)) { inspectorCollapsed = false }
+                    InspectorRail(summary: PanelSummary(state: session.state),
+                                  shortcut: hotkeys.hotkey(for: AppHotkeys.toggleInspector)) { inspectorCollapsed = false }
                         .frame(width: 28)
                 } else {
                     SidePanel(state: session.state, report: session.summary,
+                              summarizeShortcut: hotkeys.hotkey(for: AppHotkeys.summarize),
                               onSummarize: { model.summarize(session.id) })
                         .frame(minWidth: 240, idealWidth: 320, maxWidth: 480)
                 }
             } else {
                 VStack(spacing: 12) {
                     EmptyHint("No session")
-                    Button("New Session…  ⌘N") { model.chooseProjectAndStart() }
+                    Button("New Session…" + (hotkeys.hotkey(for: AppHotkeys.newSession).map { "  " + $0.symbols } ?? "")) {
+                        model.chooseProjectAndStart()
+                    }
                         .buttonStyle(.plain)
                         .font(MuseFont.body)
                         .foregroundStyle(Palette.accent)

@@ -34,16 +34,18 @@ public struct SessionHeader: View {
     let mode: String?
     let needsAttention: Bool
     let inspectorCollapsed: Bool
+    let inspectorShortcut: Hotkey?
     let onToggleInspector: () -> Void
 
     public init(project: String, session: String, usage: Usage?, mode: String?, needsAttention: Bool,
-                inspectorCollapsed: Bool, onToggleInspector: @escaping () -> Void) {
+                inspectorCollapsed: Bool, inspectorShortcut: Hotkey?, onToggleInspector: @escaping () -> Void) {
         self.project = project
         self.session = session
         self.usage = usage
         self.mode = mode
         self.needsAttention = needsAttention
         self.inspectorCollapsed = inspectorCollapsed
+        self.inspectorShortcut = inspectorShortcut
         self.onToggleInspector = onToggleInspector
     }
 
@@ -62,7 +64,7 @@ public struct SessionHeader: View {
                         .foregroundStyle(inspectorCollapsed ? Palette.faint : Palette.muted)
                 }
                 .buttonStyle(IconButtonStyle())
-                .help(inspectorCollapsed ? "Show inspector (⌥⌘0)" : "Hide inspector (⌥⌘0)")
+                .help(Hotkey.help(inspectorCollapsed ? "Show inspector" : "Hide inspector", inspectorShortcut))
                 .padding(.leading, 6)
             }
             .font(MuseFont.small)

@@ -151,12 +151,11 @@ public struct SessionSidebar: View {
             }
             HairLine()
             Button { onNewSession(nil) } label: {
-                Text("＋ New session").font(MuseFont.body).foregroundStyle(Palette.accent)
+                Label("New session", systemImage: "plus").font(.system(size: 14)).foregroundStyle(Palette.accent)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .padding(10)
+            .buttonStyle(IconButtonStyle(size: 32))
+            .padding(6)
         }
         .background(Palette.bg)
     }
@@ -179,10 +178,9 @@ public struct SessionSidebar: View {
             .buttonStyle(.plain)
             .help(group.id)
             Button { onNewSession(group.id) } label: {
-                Text("＋").font(MuseFont.groupHeading).foregroundStyle(Palette.muted)
-                    .contentShape(Rectangle())
+                Image(systemName: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(Palette.muted)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(IconButtonStyle())
             .help("New session in \(group.name)")
         }
         .padding(.horizontal, 4)
@@ -246,12 +244,14 @@ struct SessionRow: View {
                 }
             }
             Spacer(minLength: 0)
-            Button(action: onClose) {
-                Text("×").foregroundStyle(Palette.muted).contentShape(Rectangle())
+            if hovering && !editing {
+                // Only there on hover, so a resting row gives its whole width to the title.
+                Button(action: onClose) {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.muted)
+                }
+                .buttonStyle(IconButtonStyle())
+                .help("Close session")
             }
-            .buttonStyle(.plain)
-            .help("Close session")
-            .opacity(hovering && !editing ? 1 : 0)
         }
         .onHover { hovering = $0 }
         .font(MuseFont.rowTitle)

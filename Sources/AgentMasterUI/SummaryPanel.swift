@@ -47,7 +47,7 @@ public struct SummaryPanel: View {
     }
 
     private func action(_ title: String, _ perform: @escaping () -> Void) -> some View {
-        Button(title, action: perform).buttonStyle(.plain).font(MuseFont.small).foregroundStyle(Palette.accent)
+        Button(title, action: perform).buttonStyle(OutlineButtonStyle())
     }
 }
 

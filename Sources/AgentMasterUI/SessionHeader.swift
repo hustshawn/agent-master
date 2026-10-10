@@ -58,17 +58,17 @@ public struct SessionHeader: View {
                 Spacer(minLength: 12)
                 usageText.help(HeaderUsage.tokens(usage) ?? "")
                 Button(action: onToggleInspector) {
-                    Image(systemName: "sidebar.right")
+                    Image(systemName: "sidebar.right").font(.system(size: 15))
                         .foregroundStyle(inspectorCollapsed ? Palette.faint : Palette.muted)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(IconButtonStyle())
                 .help(inspectorCollapsed ? "Show inspector (⌥⌘0)" : "Hide inspector (⌥⌘0)")
                 .padding(.leading, 6)
             }
             .font(MuseFont.small)
-            .padding(.horizontal, 12)
-            .frame(height: 28)
+            .padding(.leading, 12)
+            .padding(.trailing, 6)
+            .frame(height: 34)
             HairLine(color: needsAttention ? Palette.accent : Palette.faint)
         }
         .background(Palette.bg)

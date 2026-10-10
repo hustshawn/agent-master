@@ -44,7 +44,7 @@ public struct SidePanel: View {
                         Text("SUMMARY").font(MuseFont.heading).foregroundStyle(Palette.muted)
                         Spacer()
                         Button("Summarize", action: onSummarize)
-                            .buttonStyle(.plain).font(MuseFont.small).foregroundStyle(Palette.accent)
+                            .buttonStyle(OutlineButtonStyle())
                             .help("Summarize and review this session (⌥⌘S)")
                     }
                     .padding(.horizontal, 12)

@@ -59,3 +59,51 @@ public struct EmptyHint: View {
         Text(text).font(MuseFont.small).foregroundStyle(Palette.faint)
     }
 }
+
+/// Toolbar-like buttons: at least `size`×`size` to click, with a soft background on hover and while pressed.
+public struct IconButtonStyle: ButtonStyle {
+    let size: CGFloat
+
+    public init(size: CGFloat = 28) {
+        self.size = size
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        HoverBackground(pressed: configuration.isPressed, cornerRadius: 6) {
+            configuration.label
+                .padding(.horizontal, 6)
+                .frame(minWidth: size, minHeight: size)
+        }
+    }
+}
+
+/// A small outlined text button, for actions inside a panel (Summarize, Copy…).
+public struct OutlineButtonStyle: ButtonStyle {
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        HoverBackground(pressed: configuration.isPressed, cornerRadius: 6) {
+            configuration.label
+                .font(MuseFont.body)
+                .foregroundStyle(Palette.accent)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 26)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.faint, lineWidth: 1))
+    }
+}
+
+private struct HoverBackground<Content: View>: View {
+    let pressed: Bool
+    let cornerRadius: CGFloat
+    @ViewBuilder let content: Content
+    @State private var hovering = false
+
+    var body: some View {
+        content
+            .contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(Color.white.opacity(pressed ? 0.14 : hovering ? 0.08 : 0)))
+            .onHover { hovering = $0 }
+    }
+}

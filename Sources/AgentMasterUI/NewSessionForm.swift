@@ -10,16 +10,25 @@ public struct NewSessionAgent: Identifiable, Equatable {
     public let allowsCustomModel: Bool
     /// The agent's default model from Settings; nil follows the agent's own configuration.
     public let defaultModel: String?
+    /// Where the agent's binary was found; nil when it is not installed, so it cannot be picked.
+    public let location: String?
+    /// Shown on a missing agent's card, e.g. how to install it.
+    public let missingHint: String
 
     public init(id: String, name: String, glyph: AgentGlyphStyle = .symbol("terminal"), modelChoices: [AgentChoice] = [],
-                allowsCustomModel: Bool = true, defaultModel: String? = nil) {
+                allowsCustomModel: Bool = true, defaultModel: String? = nil, location: String? = "",
+                missingHint: String = "") {
         self.id = id
         self.name = name
         self.glyph = glyph
         self.modelChoices = modelChoices
         self.allowsCustomModel = allowsCustomModel
         self.defaultModel = defaultModel
+        self.location = location
+        self.missingHint = missingHint
     }
+
+    public var isInstalled: Bool { location != nil }
 }
 
 /// What the new-session popover asks for. A nil model means "use the agent's default".
@@ -51,7 +60,7 @@ public struct NewSessionForm: View {
         self.chooseFolder = chooseFolder
         self.onStart = onStart
         self.onCancel = onCancel
-        _agentId = State(initialValue: agents.first?.id ?? "")
+        _agentId = State(initialValue: Self.initialAgentId(agents))
         _project = State(initialValue: initialProject ?? projects.first)
     }
 
@@ -76,7 +85,8 @@ public struct NewSessionForm: View {
             HStack(spacing: 10) {
                 Spacer()
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
-                Button("Start", action: start).keyboardShortcut(.defaultAction).disabled(project == nil)
+                Button("Start", action: start).keyboardShortcut(.defaultAction)
+                    .disabled(project == nil || agent?.isInstalled != true)
             }
             .controlSize(.large)
         }
@@ -96,7 +106,7 @@ public struct NewSessionForm: View {
     private func agentCard(_ agent: NewSessionAgent) -> some View {
         let selected = agent.id == agentId
         return Button {
-            guard agentId != agent.id else { return }
+            guard agent.isInstalled, agentId != agent.id else { return }
             agentId = agent.id
             modelTag = AgentChoiceSelection.followTag
             customModel = ""
@@ -104,9 +114,11 @@ public struct NewSessionForm: View {
             VStack(spacing: 10) {
                 AgentGlyph(style: agent.glyph, size: 44)
                 Text(agent.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(Palette.text)
-                Text(agent.defaultModel ?? "default model").font(.system(size: 12)).foregroundStyle(Palette.muted)
+                Text(agent.isInstalled ? agent.defaultModel ?? "default model" : "not installed")
+                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
                     .lineLimit(1).truncationMode(.middle)
             }
+            .opacity(agent.isInstalled ? 1 : 0.45)
             .padding(.vertical, 16)
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity)
@@ -116,6 +128,13 @@ public struct NewSessionForm: View {
             .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
+        .disabled(!agent.isInstalled)
+        .help(agent.isInstalled ? "" : agent.missingHint)
+    }
+
+    /// The card selected when the panel opens: the first installed agent, else the first (Start stays disabled).
+    static func initialAgentId(_ agents: [NewSessionAgent]) -> String {
+        (agents.first(where: \.isInstalled) ?? agents.first)?.id ?? ""
     }
 
     private var projectRow: some View {

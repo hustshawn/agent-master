@@ -94,9 +94,15 @@ final class AppModel {
         return url.path
     }
 
-    /// Every agent's glyph, model choices and current default, for the new-session panel.
+    /// Whether the agent's binary can be found, with the same lookup Settings and the new-session panel use.
+    func isInstalled(_ agent: any AgentKind) -> Bool {
+        agent.executable.locate(environment: capturedEnvironment ?? ProcessInfo.processInfo.environment) != nil
+    }
+
+    /// Every agent's glyph, model choices, current default and whether it is installed, for the new-session panel.
     func newSessionAgents() -> [NewSessionAgent] {
-        AgentRegistry.all.map { agent in
+        let environment = capturedEnvironment ?? ProcessInfo.processInfo.environment
+        return AgentRegistry.all.map { agent in
             let modelOption = agent.options(environment: capturedEnvironment ?? [:]).first { $0.id == AgentOption.modelId }
             var choices: [AgentChoice] = []
             var allowsCustom = false
@@ -106,7 +112,9 @@ final class AppModel {
             }
             return NewSessionAgent(id: agent.id, name: agent.displayName, glyph: agent.glyph, modelChoices: choices,
                                    allowsCustomModel: allowsCustom,
-                                   defaultModel: preferenceStore.preferences(for: agent.id).string(AgentOption.modelId))
+                                   defaultModel: preferenceStore.preferences(for: agent.id).string(AgentOption.modelId),
+                                   location: agent.executable.locate(environment: environment),
+                                   missingHint: "Not found. Install \(agent.executable.name) or set \(agent.executable.overrideVariable).")
         }
     }
 

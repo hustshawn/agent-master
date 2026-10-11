@@ -250,4 +250,19 @@ final class AgentMasterUITests: XCTestCase {
         XCTAssertEqual(NewSessionForm.model(tag: AgentChoiceSelection.customTag, custom: " gpt-5 "), "gpt-5")
         XCTAssertNil(NewSessionForm.model(tag: AgentChoiceSelection.customTag, custom: "  "))
     }
+
+    func testAgentWithoutALocationIsNotInstalled() {
+        XCTAssertTrue(NewSessionAgent(id: "claude", name: "Claude Code", location: "~/.local/bin/claude").isInstalled)
+        XCTAssertFalse(NewSessionAgent(id: "kiro", name: "Kiro", location: nil, missingHint: "Not found.").isInstalled)
+    }
+
+    func testNewSessionStartsOnTheFirstInstalledAgent() {
+        let claude = NewSessionAgent(id: "claude", name: "Claude Code", location: nil)
+        let codex = NewSessionAgent(id: "codex", name: "Codex", location: "/opt/homebrew/bin/codex")
+        let kiro = NewSessionAgent(id: "kiro", name: "Kiro", location: nil)
+        XCTAssertEqual(NewSessionForm.initialAgentId([codex, kiro]), "codex")
+        XCTAssertEqual(NewSessionForm.initialAgentId([claude, codex, kiro]), "codex", "skips an agent that is not installed")
+        XCTAssertEqual(NewSessionForm.initialAgentId([claude, kiro]), "claude", "none installed: the first, with Start disabled")
+        XCTAssertEqual(NewSessionForm.initialAgentId([]), "")
+    }
 }

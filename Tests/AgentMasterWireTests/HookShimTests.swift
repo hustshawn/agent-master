@@ -90,6 +90,35 @@ final class HookShimTests: XCTestCase {
         XCTAssertEqual(run(json, mode: .statusline, connection: nil), StatusLineFormatter.format(payload))
     }
 
+    func testUserStatusLineReplacesOursAndStillForwards() {
+        let json = #"{"model":{"display_name":"Haiku 4.5"},"cwd":"/tmp/p"}"#
+        let connection = FakeConnection()
+        var received: Data?
+        let output = HookShim.run(mode: .statusline, input: Data(json.utf8), environment: env,
+                                  connector: FakeConnector(connection: connection),
+                                  userStatusLine: { data, _ in received = data; return "mine" }, makeId: { "M1" })
+        XCTAssertEqual(output, "mine")
+        XCTAssertEqual(received, Data(json.utf8))
+        XCTAssertEqual(connection.sent.first?.kind, .statusline)
+        // Also when the app is not running.
+        XCTAssertEqual(HookShim.run(mode: .statusline, input: Data(json.utf8), environment: env, connector: nil,
+                                    userStatusLine: { _, _ in "mine" }), "mine")
+    }
+
+    func testUserStatusLineFailureFallsBackToOurs() {
+        let json = #"{"model":{"display_name":"Haiku 4.5"}}"#
+        let payload = try! JSONValue.parse(Data(json.utf8))
+        XCTAssertEqual(HookShim.run(mode: .statusline, input: Data(json.utf8), environment: env, connector: nil,
+                                    userStatusLine: { _, _ in nil }), StatusLineFormatter.format(payload))
+    }
+
+    func testHooksIgnoreTheUserStatusLine() {
+        var called = false
+        _ = HookShim.run(mode: .hook, input: Data(#"{"hook_event_name":"Stop"}"#.utf8), environment: env,
+                         connector: nil, userStatusLine: { _, _ in called = true; return "mine" })
+        XCTAssertFalse(called)
+    }
+
     func testStatusLineFormat() throws {
         let payload = try JSONValue.parse(Data(#"{"model":{"display_name":"Haiku 4.5"},"workspace":{"current_dir":"/tmp/my proj"},"context_window":{"used_percentage":12}}"#.utf8))
         XCTAssertEqual(StatusLineFormatter.format(payload),

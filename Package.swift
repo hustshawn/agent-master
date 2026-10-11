@@ -15,6 +15,8 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"6.0.0"),
         // Sends Web Push over SwiftNIO; already in the graph through HummingbirdTesting.
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.21.0"),
+        // Already in the graph through Hummingbird; 1.1.3 and later use `#isolation` and no longer build with Swift 5.10.
+        .package(url: "https://github.com/apple/swift-async-algorithms.git", "1.0.2"..<"1.1.3"),
     ],
     targets: [
         .target(name: "AgentMasterCore"),
@@ -29,7 +31,8 @@ let package = Package(
                                .product(name: "Hummingbird", package: "hummingbird"),
                                .product(name: "HummingbirdWebSocket", package: "hummingbird-websocket"),
                                .product(name: "Crypto", package: "swift-crypto"),
-                               .product(name: "AsyncHTTPClient", package: "async-http-client")],
+                               .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                               .product(name: "AsyncAlgorithms", package: "swift-async-algorithms")],
                 resources: [.copy("Web")]),
         .executableTarget(name: "agentmaster-server", dependencies: ["AgentMasterServerKit"]),
 

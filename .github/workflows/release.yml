@@ -39,10 +39,12 @@ jobs:
       - name: Disk image
         run: ./scripts/make-dmg.sh "AgentMaster-$TAG.dmg"
 
+      # Only handed to the publish job; kept for a day so they do not fill the private repo's artifact quota.
       - uses: actions/upload-artifact@v6
         with:
           name: app
           path: AgentMaster-*.dmg
+          retention-days: 1
 
   server:
     strategy:
@@ -67,6 +69,7 @@ jobs:
         with:
           name: server-${{ matrix.runner }}
           path: build/agentmaster-server-*.tar.gz
+          retention-days: 1
 
   publish:
     if: github.ref_type == 'tag'

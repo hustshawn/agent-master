@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import SwiftTerm
 import AgentMasterCore
 @testable import TerminalKit
 
@@ -70,5 +71,31 @@ final class TerminalKitTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setString("hello", forType: .string)
         XCTAssertNil(AgentTerminalView.pasteInput(pasteboard: pasteboard, kittyKeyboard: true))
+    }
+
+    func testClickedPathsOpenAsFilesInTheSessionDirectory() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("am-link-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("Sources"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("Sources/Foo.swift")
+        try Data().write(to: file)
+
+        // What SwiftTerm detects in `Edited Sources/Foo.swift:12.` at the end of a line.
+        let view = AgentTerminalView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+        view.feed(text: "Edited Sources/Foo.swift:12.")
+        let detected = try XCTUnwrap(view.getTerminal().link(at: .screen(Position(col: 10, row: 0)), mode: .explicitAndImplicit))
+        XCTAssertEqual(detected, "Sources/Foo.swift:12.")
+
+        for link in [detected, "Sources/Foo.swift", "./Sources/Foo.swift:12:5", file.path, "\(file.path),"] {
+            let url = try XCTUnwrap(AgentTerminalView.linkURL(link, relativeTo: dir.path), link)
+            XCTAssertTrue(url.isFileURL, link)
+            XCTAssertEqual(url.path, file.path, link)
+        }
+        XCTAssertEqual(AgentTerminalView.linkURL("Sources", relativeTo: dir.path)?.path, dir.appendingPathComponent("Sources").path)
+        XCTAssertEqual(AgentTerminalView.linkURL("~/Library", relativeTo: dir.path)?.path,
+                       FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library").path)
+        XCTAssertNil(AgentTerminalView.linkURL("Sources/Missing.swift", relativeTo: dir.path))
+        XCTAssertEqual(AgentTerminalView.linkURL("https://example.com/a?b=1", relativeTo: dir.path)?.absoluteString,
+                       "https://example.com/a?b=1")
     }
 }

@@ -14,6 +14,7 @@ public final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         view = AgentTerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
         super.init()
         TerminalPalette.apply(to: view)
+        view.workingDirectory = launch.currentDirectory
         view.processDelegate = self
         view.startProcess(executable: launch.executable, args: launch.args, environment: launch.environmentStrings,
                           execName: nil, currentDirectory: launch.currentDirectory)

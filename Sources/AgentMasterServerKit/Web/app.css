@@ -64,9 +64,19 @@ svg { display: block; flex: none; }
 .app:not(.settings-open) .settings-pane { display: none; }
 .app.sidebar-collapsed .list-pane { display: none; }
 .list-pane, .home-pane, .detail-pane, .settings-pane { min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-.list-pane { flex: 0 0 360px; border-right: 1px solid var(--line); }
+/* --list-width is the dragged width (see "sidebar width" in app.js); the max-width keeps a narrowed window's
+   content usable without JS. */
+.list-pane { flex: 0 0 var(--list-width, 360px); max-width: calc(100% - 320px); border-right: 1px solid var(--line); }
 .home-pane, .detail-pane, .settings-pane { flex: 1; min-width: 0; }
 .sidebar-backdrop { display: none; }
+/* The list-pane's right border is the drag handle: no width of its own in the flex row, only a hit area
+   straddling the border, which lights up while hovered or dragged. */
+.sidebar-resizer { flex: none; width: 0; position: relative; z-index: 5; cursor: col-resize; touch-action: none; }
+.sidebar-resizer::before { content: ""; position: absolute; inset: 0 -4px; }
+.sidebar-resizer:hover::after, .app.sidebar-resizing .sidebar-resizer::after {
+  content: ""; position: absolute; inset: 0 0 0 -2px; background: var(--accent); }
+.app.sidebar-resizing, .app.sidebar-resizing * { cursor: col-resize; }
+.app.sidebar-collapsed .sidebar-resizer, .app.settings-open .sidebar-resizer { display: none; }
 
 /* MARK: session list */
 .list-top { padding: 18px 18px 12px; flex: none; }
@@ -79,13 +89,19 @@ svg { display: block; flex: none; }
 .in-app-brand:hover { background: var(--raised); }
 .in-app-brand img { width: 30px; height: 30px; border-radius: 7px; }
 .brand-actions { display: flex; align-items: center; gap: 4px; flex: none; }
-/* In a phone-width drawer the bigger brand leaves no room for "Online": keep its icon (the word is still
-   read out, being only shrunk to nothing); "Offline"/"Reconnecting…" always keep their words. */
-@media (max-width: 420px) {
+/* Sized by the sidebar's own width, which is the phone drawer's or the dragged desktop sidebar's.
+   Narrower than ~355px the bigger brand leaves no room for "Online": keep its icon (the word is still read
+   out, being only shrunk to nothing); "Offline"/"Reconnecting…" always keep their words. The filter tabs
+   scroll sideways instead of being cut off. */
+.list-pane { container-type: inline-size; }
+@container (max-width: 354px) {
   .list-pane .cloud-state:not(.offline) { font-size: 0; gap: 0; }
+  .filter-tabs { overflow-x: auto; scrollbar-width: none; }
+  .filter-tabs::-webkit-scrollbar { display: none; }
+  .filter-tabs button { flex: none; }
 }
 /* A 320px phone leaves a ~276px drawer: one size down still reads as the brand. */
-@media (max-width: 360px) {
+@container (max-width: 315px) {
   .in-app-brand { font-size: 16px; gap: 7px; margin-right: 0; }
   .in-app-brand img { width: 26px; height: 26px; }
   .brand-line { gap: 12px; }
@@ -587,11 +603,12 @@ dialog.attach-sheet { padding: 0; }
   /* The sidebar is a left drawer here, closed by default (see setSidebarOpen()/updateSidebarChrome() in
      app.js): taken out of the flex flow and pinned instead, so a closed list-pane needs no flex-basis
      bookkeeping the way the desktop collapse does — it just slides off-screen. */
-  .list-pane { position: absolute; inset: 0 auto 0 0; z-index: 30; width: min(340px, calc(100% - 44px));
+  .list-pane { position: absolute; inset: 0 auto 0 0; z-index: 30; width: min(340px, calc(100% - 44px)); max-width: none;
     background: #1c1c21; transform: translateX(-100%); visibility: hidden;
     transition: transform 0.2s ease, visibility 0s linear 0.2s; box-shadow: 2px 0 24px rgba(0, 0, 0, 0.4); }
   .app.sidebar-drawer-open .list-pane { transform: translateX(0); visibility: visible; transition-delay: 0s; }
   .sidebar-backdrop { display: block; position: absolute; inset: 0; z-index: 29; background: rgba(0, 0, 0, 0.5); }
+  .sidebar-resizer { display: none; }
   .home-topbar { padding-top: calc(9px + env(safe-area-inset-top)); }
   .home-content { padding: 22px 18px 36px; }
   /* A long first prompt as the title must not push the conversation off the screen. */

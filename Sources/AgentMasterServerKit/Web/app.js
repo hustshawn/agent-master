@@ -659,6 +659,41 @@ document.addEventListener("keydown", (event) => {
 // though neither preference changed; isSidebarOpen() already reads the right one for the new width.
 window.matchMedia("(max-width: 700px)").addEventListener("change", updateSidebarChrome);
 
+// MARK: sidebar width (desktop) — drag the list-pane's right border (#sidebar-resizer). Remembered per
+// device like the collapse; the phone drawer keeps its own width. Terminals refit through their ResizeObserver.
+
+const SIDEBAR_MIN_WIDTH = 280, SIDEBAR_MAX_WIDTH = 600, CONTENT_MIN_WIDTH = 320;   // the last also in app.css
+
+function setSidebarWidth(width) {
+  $("app").style.setProperty("--list-width", width + "px");
+}
+
+const savedSidebarWidth = Number(localStorage.getItem("am.sidebarWidth"));
+if (savedSidebarWidth) setSidebarWidth(savedSidebarWidth);
+
+$("sidebar-resizer").addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();   // no text selection, and the terminal underneath keeps its focus
+  const resizer = event.currentTarget;
+  resizer.setPointerCapture(event.pointerId);
+  const startX = event.clientX;
+  let width = Math.round($("list-pane").getBoundingClientRect().width);
+  const startWidth = width;
+  const max = Math.min(SIDEBAR_MAX_WIDTH, window.innerWidth - CONTENT_MIN_WIDTH);
+  $("app").classList.add("sidebar-resizing");
+  const move = (moveEvent) => {
+    width = Math.round(Math.max(SIDEBAR_MIN_WIDTH, Math.min(max, startWidth + moveEvent.clientX - startX)));
+    setSidebarWidth(width);
+  };
+  resizer.addEventListener("pointermove", move);
+  // Fires after pointerup and pointercancel alike.
+  resizer.addEventListener("lostpointercapture", () => {
+    resizer.removeEventListener("pointermove", move);
+    $("app").classList.remove("sidebar-resizing");
+    localStorage.setItem("am.sidebarWidth", String(width));
+  }, { once: true });
+});
+
 // MARK: home — shown whenever no valid session is selected. See HOME-SPEC.md and the PR #9 review's "首页"
 // section: a loading state before the first snapshot, a first-run guide with none ever created, otherwise
 // New session plus needs-you items first and up to four recent sessions, sorted by real last activity.

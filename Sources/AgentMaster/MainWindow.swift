@@ -25,8 +25,10 @@ struct MainWindow: View {
                                   inspectorCollapsed: inspectorCollapsed,
                                   inspectorShortcut: hotkeys.hotkey(for: AppHotkeys.toggleInspector),
                                   onToggleInspector: { inspectorCollapsed.toggle() })
+                    // Same inset as the web edition's `.term-pane`, so the first row doesn't touch the header rule.
                     TerminalHost(session: session.terminal)
                         .id(session.id)
+                        .padding(EdgeInsets(top: 6, leading: 14, bottom: 10, trailing: 0))
                 }
                 .frame(minWidth: 520)
 

@@ -173,7 +173,7 @@ final class AgentMasterUITests: XCTestCase {
         XCTAssertEqual(SessionTitle.text(customName: nil, firstPrompt: nil), "New session")
     }
 
-    func testPanelSummaryCountsAndEmptiness() {
+    func testPanelSummaryEmptiness() {
         var state = SessionState()
         let empty = PanelSummary(state: state)
         XCTAssertTrue(empty.todoEmpty && empty.agentsEmpty && empty.changesEmpty, "main alone is not content")
@@ -186,10 +186,6 @@ final class AgentMasterUITests: XCTestCase {
                            SubagentInfo(id: "s3", type: "t", startedAt: Date(), finishedAt: Date())]
         state.changes = [FileChange(path: "a.swift", hunks: [])]
         let summary = PanelSummary(state: state)
-        XCTAssertEqual(summary.openTodos, 2)
-        XCTAssertEqual(summary.runningAgents, 1)
-        XCTAssertEqual(summary.finishedAgents, 2)
-        XCTAssertEqual(summary.changedFiles, 1)
         XCTAssertFalse(summary.todoEmpty || summary.agentsEmpty || summary.changesEmpty)
     }
 

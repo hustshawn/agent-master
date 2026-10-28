@@ -30,11 +30,7 @@ struct MainWindow: View {
                 }
                 .frame(minWidth: 520)
 
-                if inspectorCollapsed {
-                    InspectorRail(summary: PanelSummary(state: session.state),
-                                  shortcut: hotkeys.hotkey(for: AppHotkeys.toggleInspector)) { inspectorCollapsed = false }
-                        .frame(width: 28)
-                } else {
+                if !inspectorCollapsed {
                     SidePanel(state: session.state, report: session.summary,
                               summarizeShortcut: hotkeys.hotkey(for: AppHotkeys.summarize),
                               onSummarize: { model.summarize(session.id) })

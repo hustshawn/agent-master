@@ -303,23 +303,27 @@ struct SessionRow: View {
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(StatusGlyph.symbol(for: row.status)).foregroundStyle(Color(hex: StatusGlyph.colorHex(for: row.status)))
-            VStack(alignment: .leading, spacing: 2) {
-                if editing {
-                    TextField("", text: $draft)
-                        .textFieldStyle(.plain)
-                        .foregroundStyle(Palette.text)
-                        .focused($fieldFocused)
-                        .onSubmit(onCommit)
-                        .onExitCommand(perform: onCancel)
-                        .onAppear { fieldFocused = true }
-                        .onChange(of: fieldFocused) { _, focused in if !focused { onCommit() } }
-                } else {
-                    Text(row.title).foregroundStyle(selected ? Palette.text : Palette.muted).lineLimit(1)
-                }
-                if !row.subtitle.isEmpty {
-                    Text(row.subtitle).font(MuseFont.rowSubtitle).foregroundStyle(Palette.faint).lineLimit(1)
+        // The trailing button is centred, not on the title's baseline: there it stuck out above the title,
+        // so a hovered row grew taller and the rows below jumped as the pointer moved.
+        HStack(spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(StatusGlyph.symbol(for: row.status)).foregroundStyle(Color(hex: StatusGlyph.colorHex(for: row.status)))
+                VStack(alignment: .leading, spacing: 2) {
+                    if editing {
+                        TextField("", text: $draft)
+                            .textFieldStyle(.plain)
+                            .foregroundStyle(Palette.text)
+                            .focused($fieldFocused)
+                            .onSubmit(onCommit)
+                            .onExitCommand(perform: onCancel)
+                            .onAppear { fieldFocused = true }
+                            .onChange(of: fieldFocused) { _, focused in if !focused { onCommit() } }
+                    } else {
+                        Text(row.title).foregroundStyle(selected ? Palette.text : Palette.muted).lineLimit(1)
+                    }
+                    if !row.subtitle.isEmpty {
+                        Text(row.subtitle).font(MuseFont.rowSubtitle).foregroundStyle(Palette.faint).lineLimit(1)
+                    }
                 }
             }
             Spacer(minLength: 0)

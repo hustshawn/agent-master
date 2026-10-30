@@ -158,12 +158,26 @@ final class SessionRestoreTests: XCTestCase {
         XCTAssertEqual(OpenSessionJournal(fileURL: journalURL).load().map(\.title), ["fix the bug", nil])
     }
 
-    func testLegacyRecordWithoutTitleDecodes() throws {
+    func testLegacyRecordWithoutTitleOrLastActivityDecodes() throws {
         try FileManager.default.createDirectory(at: journalURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let legacy = #"[{"agentId":"claude","projectPath":"/p","createdAt":0,"resumeId":"a","selected":false}]"#
         try Data(legacy.utf8).write(to: journalURL)
         let records = OpenSessionJournal(fileURL: journalURL).load()
         XCTAssertEqual(records.map(\.resumeId), ["a"])
         XCTAssertNil(records[0].title)
+        XCTAssertNil(records[0].lastActivityAt)
+    }
+
+    // MARK: last activity
+
+    func testLastActivityRoundTripsThroughTheJournal() {
+        var active = state(.idle, claudeId: "a")
+        active.lastActivityAt = Date(timeIntervalSince1970: 120)
+        let snapshots = [OpenSessionSnapshot(agentId: "claude", projectPath: "/p", createdAt: Date(timeIntervalSince1970: 0),
+                                             state: active, selected: false, fallbackResumeId: nil),
+                         snapshot(claudeId: "b")]
+        OpenSessionJournal(fileURL: journalURL).save(RestorePlan.records(from: snapshots, agents: agents))
+        XCTAssertEqual(OpenSessionJournal(fileURL: journalURL).load().map(\.lastActivityAt),
+                       [Date(timeIntervalSince1970: 120), nil])
     }
 }

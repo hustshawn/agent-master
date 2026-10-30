@@ -24,13 +24,16 @@ final class SessionController: Identifiable {
     @ObservationIgnored let terminal: TerminalSession
     @ObservationIgnored private var translator: HookTranslator
 
-    init(id: String, agent: any AgentKind, projectPath: String, resumeHint: String? = nil, launch: TerminalLaunch) {
+    /// `lastActivityAt` keeps a restored session's place in the sidebar.
+    init(id: String, agent: any AgentKind, projectPath: String, resumeHint: String? = nil, lastActivityAt: Date? = nil,
+         launch: TerminalLaunch) {
         self.id = id
         self.agentId = agent.id
         translator = HookTranslator(dialect: agent.hookDialect)
         self.projectPath = projectPath
         self.resumeHint = resumeHint
         terminal = TerminalSession(launch: launch)
+        state.lastActivityAt = lastActivityAt
         terminal.onExit = { [weak self] _ in
             guard let self, self.state.status != .ended else { return }
             self.apply([.sessionEnded(reason: "process_exit")])
@@ -66,6 +69,6 @@ final class SessionController: Identifiable {
             subtitle = "\(name) · \(subtitle)"
         }
         return SessionRowModel(id: id, projectPath: projectPath, title: displayTitle,
-                               subtitle: subtitle, status: state.status, createdAt: createdAt)
+                               subtitle: subtitle, status: state.status, lastActivityAt: state.lastActivityAt ?? createdAt)
     }
 }

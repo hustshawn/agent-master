@@ -25,6 +25,9 @@ public struct SessionState: Equatable, Sendable {
     /// The first real prompt of this conversation (slash commands skipped); names the session by default.
     public var firstPrompt: String?
     public var endReason: String?
+    /// When a prompt was last sent, the agent last asked for the user, or a turn last finished. Tool calls and
+    /// the status line don't count, so two running sessions don't keep swapping places in the sidebar.
+    public var lastActivityAt: Date?
 
     public init() {}
 
@@ -61,6 +64,7 @@ public struct SessionState: Equatable, Sendable {
             if firstPrompt == nil, let line = Self.titleLine(text) { firstPrompt = line }
             setStatus(.running)
             attentionMessage = nil
+            lastActivityAt = now
 
         case .toolStarted(let call):
             runningTools.removeAll { $0.id == call.id }
@@ -117,12 +121,14 @@ public struct SessionState: Equatable, Sendable {
         case .needsAttention(let message):
             setStatus(.needsAttention)
             attentionMessage = message
+            lastActivityAt = now
 
         case .turnFinished(let lastMessage):
             runningTools = []
             attentionMessage = nil
             if let lastMessage { self.lastMessage = lastMessage }
             setStatus(.idle)
+            lastActivityAt = now
 
         case .sessionEnded(let reason):
             runningTools = []

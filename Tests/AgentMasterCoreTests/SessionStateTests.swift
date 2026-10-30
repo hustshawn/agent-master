@@ -114,6 +114,26 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(state.permissionMode, "plan")
     }
 
+    func testOnlyPromptsAttentionAndFinishedTurnsMoveLastActivity() {
+        var state = SessionState()
+        let usage = Usage(modelName: "Haiku 4.5", contextUsedPercent: 12, inputTokens: 1, outputTokens: 2, costUSD: 0.5)
+        state.apply(.sessionStarted(agentSessionId: "s1", cwd: "/p", transcriptPath: nil), at: t0)
+        state.apply(.permissionModeChanged("plan"), at: t0)
+        state.apply(.usageUpdated(usage), at: t0)
+        XCTAssertNil(state.lastActivityAt, "a resumed session reports these on launch without anyone doing anything")
+        state.apply(.promptSubmitted(text: "hi"), at: t0.addingTimeInterval(1))
+        XCTAssertEqual(state.lastActivityAt, t0.addingTimeInterval(1))
+        state.apply(.toolStarted(bash), at: t0.addingTimeInterval(2))
+        state.apply(.toolFinished(toolUseId: "t1", outcome: .success, durationMs: 5), at: t0.addingTimeInterval(3))
+        XCTAssertEqual(state.lastActivityAt, t0.addingTimeInterval(1), "tool calls do not count")
+        state.apply(.needsAttention(message: "x"), at: t0.addingTimeInterval(4))
+        XCTAssertEqual(state.lastActivityAt, t0.addingTimeInterval(4))
+        state.apply(.turnFinished(lastMessage: nil), at: t0.addingTimeInterval(5))
+        XCTAssertEqual(state.lastActivityAt, t0.addingTimeInterval(5))
+        state.apply(.sessionStarted(agentSessionId: "s2", cwd: "/p", transcriptPath: nil), at: t0.addingTimeInterval(6))
+        XCTAssertEqual(state.lastActivityAt, t0.addingTimeInterval(5), "a new conversation keeps it")
+    }
+
     func testOnlyWorkingSessionsNeedCloseConfirmation() {
         XCTAssertTrue(SessionStatus.running.needsCloseConfirmation)
         XCTAssertTrue(SessionStatus.needsAttention.needsCloseConfirmation)

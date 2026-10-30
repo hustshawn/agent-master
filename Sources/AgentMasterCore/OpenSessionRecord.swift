@@ -11,9 +11,11 @@ public struct OpenSessionRecord: Codable, Equatable, Sendable {
     public let title: String?
     /// The web edition's "reviewed" mark on the last turn; nil (not reviewed) in older journals and the Mac app.
     public let reviewed: Bool?
+    /// `SessionState.lastActivityAt`, so the Mac sidebar keeps its order; nil before the first turn and in older journals.
+    public let lastActivityAt: Date?
 
     public init(agentId: String, projectPath: String, createdAt: Date, resumeId: String, selected: Bool,
-                title: String? = nil, reviewed: Bool? = nil) {
+                title: String? = nil, reviewed: Bool? = nil, lastActivityAt: Date? = nil) {
         self.agentId = agentId
         self.projectPath = projectPath
         self.createdAt = createdAt
@@ -21,5 +23,6 @@ public struct OpenSessionRecord: Codable, Equatable, Sendable {
         self.selected = selected
         self.title = title
         self.reviewed = reviewed
+        self.lastActivityAt = lastActivityAt
     }
 }

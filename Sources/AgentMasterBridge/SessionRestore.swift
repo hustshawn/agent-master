@@ -44,7 +44,8 @@ public enum RestorePlan {
             else { return nil }
             return OpenSessionRecord(agentId: snapshot.agentId, projectPath: snapshot.projectPath,
                                      createdAt: snapshot.createdAt, resumeId: resumeId, selected: snapshot.selected,
-                                     title: snapshot.title, reviewed: snapshot.reviewed)
+                                     title: snapshot.title, reviewed: snapshot.reviewed,
+                                     lastActivityAt: snapshot.state.lastActivityAt)
         }
     }
 

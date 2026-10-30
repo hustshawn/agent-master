@@ -138,7 +138,8 @@ final class AppModel {
     /// `model` overrides the agent's default model for this launch only.
     @discardableResult
     func startSession(in projectPath: String, agent: any AgentKind = AgentRegistry.defaultAgent,
-                      resumeId: String? = nil, title: String? = nil, model: String? = nil) async -> String? {
+                      resumeId: String? = nil, title: String? = nil, model: String? = nil,
+                      lastActivityAt: Date? = nil) async -> String? {
         do {
             let base = await environment()
             let id = UUID().uuidString
@@ -148,7 +149,7 @@ final class AppModel {
                 sessionId: id, preferences: preferences,
                 environment: base, paths: paths, resumeId: resumeId, projectPath: projectPath))
             let session = SessionController(
-                id: id, agent: agent, projectPath: projectPath, resumeHint: resumeId,
+                id: id, agent: agent, projectPath: projectPath, resumeHint: resumeId, lastActivityAt: lastActivityAt,
                 launch: TerminalLaunch(executable: launch.executable, args: launch.args,
                                        environment: launch.environment, currentDirectory: projectPath))
             session.customName = title
@@ -253,7 +254,7 @@ final class AppModel {
         for record in plan {
             guard let agent = AgentRegistry.agent(id: record.agentId),
                   let id = await startSession(in: record.projectPath, agent: agent, resumeId: record.resumeId,
-                                              title: record.title)
+                                              title: record.title, lastActivityAt: record.lastActivityAt ?? record.createdAt)
             else { continue }
             restoredIds.insert(id)
             if record.selected { restoredSelected = id }

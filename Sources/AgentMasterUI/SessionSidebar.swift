@@ -8,16 +8,16 @@ public struct SessionRowModel: Identifiable, Equatable {
     public let title: String
     public let subtitle: String
     public let status: SessionStatus
-    public let createdAt: Date
+    public let lastActivityAt: Date
 
     public init(id: String, projectPath: String, title: String, subtitle: String = "", status: SessionStatus,
-                createdAt: Date) {
+                lastActivityAt: Date) {
         self.id = id
         self.projectPath = projectPath
         self.title = title
         self.subtitle = subtitle
         self.status = status
-        self.createdAt = createdAt
+        self.lastActivityAt = lastActivityAt
     }
 }
 
@@ -89,9 +89,9 @@ public enum SessionGrouping {
         Dictionary(grouping: rows, by: \.projectPath)
             .map { path, rows in
                 SessionGroup(id: path, name: (path as NSString).lastPathComponent,
-                             rows: rows.sorted { $0.createdAt > $1.createdAt })
+                             rows: rows.sorted { $0.lastActivityAt > $1.lastActivityAt })
             }
-            .sorted { $0.rows[0].createdAt > $1.rows[0].createdAt }
+            .sorted { $0.rows[0].lastActivityAt > $1.rows[0].lastActivityAt }
     }
 
     /// The row to select once `id` is closed: the next one in its project, else the previous one,

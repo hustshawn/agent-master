@@ -24,10 +24,10 @@ final class AgentMasterUITests: XCTestCase {
         XCTAssertEqual(StatusGlyph.colorHex(for: TodoStatus.pending), Theme.muted)
     }
 
-    func testGroupingOrdersProjectsAndRowsNewestFirst() {
+    func testGroupingOrdersProjectsAndRowsByLatestActivity() {
         func row(_ id: String, _ project: String, _ minute: Double) -> SessionRowModel {
             SessionRowModel(id: id, projectPath: project, title: id, status: .idle,
-                            createdAt: Date(timeIntervalSince1970: minute * 60))
+                            lastActivityAt: Date(timeIntervalSince1970: minute * 60))
         }
         let groups = SessionGrouping.group([
             row("a1", "/w/alpha", 1), row("b1", "/w/beta", 2), row("a2", "/w/alpha", 3), row("c1", "/x/alpha", 0),
@@ -41,7 +41,7 @@ final class AgentMasterUITests: XCTestCase {
     func testSelectionAfterClosingPrefersTheSameProject() {
         func row(_ id: String, _ project: String, _ minute: Double) -> SessionRowModel {
             SessionRowModel(id: id, projectPath: project, title: id, status: .idle,
-                            createdAt: Date(timeIntervalSince1970: minute * 60))
+                            lastActivityAt: Date(timeIntervalSince1970: minute * 60))
         }
         // Display order: alpha [a3, a2, a1], beta [b1].
         let rows = [row("a1", "/w/alpha", 1), row("b1", "/w/beta", 2), row("a2", "/w/alpha", 3), row("a3", "/w/alpha", 4)]

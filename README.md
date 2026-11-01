@@ -37,7 +37,7 @@ Both have the sidebar, the agent's real TUI, the inspector, the new-session pane
 |---|---|---|---|
 | [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) | ✓ via hooks passed with `--settings` | ✓ `claude --resume` | ✓ via the status line |
 | [OpenAI Codex CLI](https://github.com/openai/codex) | ✓ via hooks passed with `-c`, which needs `--dangerously-bypass-hook-trust` ([why](docs/adr/0009-codex-agent.md)) | ✓ `codex resume` | — |
-| [Kiro CLI](https://kiro.dev/docs/cli/) | ✓ via a per-session agent config that `KIRO_AGENT_CONFIG_DIR` points to ([trade-offs](docs/adr/0012-kiro-agent.md)) | ✓ `kiro-cli chat --resume-id` | — |
+| [Kiro CLI](https://kiro.dev/docs/cli/) | ✓ on the V2 engine via a per-session agent config that `KIRO_AGENT_CONFIG_DIR` points to ([trade-offs](docs/adr/0012-kiro-agent.md)), on V3 via `~/.kiro/hooks/agentmaster.json` ([why](docs/adr/0014-kiro-v3-engine.md)) | ✓ `kiro-cli chat --resume-id` | — |
 
 More agents can be added without touching the UI. See [Adding an agent](#adding-an-agent).
 
@@ -55,7 +55,7 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
 - **Summarize a session.** Click Summarize at the top of the inspector, or right-click a session and choose Summarize Session (⌥⌘S). AgentMaster reads the session's transcript and runs `claude -p` in the background, with no tools and no saved session. The inspector then shows what was done, the changed files, open items and a short retrospective. The session itself is not interrupted. The summary is kept until you quit. This needs Claude Code installed, whichever agent ran the session.
 - **Header status.** The model and permission mode, plus context usage and cost where the agent reports them.
 - **Per-agent settings (⌘,).** Each agent has its own page. It shows where the binary was found and holds its defaults for new sessions, such as model, permission mode, sandbox and approval policy.
-- **Non-invasive.** Hooks are injected into each session through the agent's own command-line options, or for Kiro an agent config in the session's own folder. AgentMaster never edits your global Claude Code, Codex or Kiro configuration. If AgentMaster isn't running, every agent behaves as usual.
+- **Non-invasive.** Hooks are injected into each session through the agent's own command-line options, or for Kiro's V2 engine an agent config in the session's own folder. AgentMaster never edits your global Claude Code or Codex configuration. Kiro's V3 engine reads hooks only from Kiro's own folder, so for it AgentMaster adds one file, `~/.kiro/hooks/agentmaster.json`, which does nothing in sessions AgentMaster didn't start. If AgentMaster isn't running, every agent behaves as usual.
 
 ## Requirements
 
@@ -67,7 +67,7 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
   |---|---|---|
   | Claude Code | `AGENTMASTER_CLAUDE_PATH` | `~/.local/bin/claude`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
   | Codex CLI 0.154 or later | `AGENTMASTER_CODEX_PATH` | `~/.local/bin/codex`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
-  | Kiro CLI 2.25 or later | `AGENTMASTER_KIRO_PATH` | `~/.local/bin/kiro-cli`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
+  | Kiro CLI 2.25 or later (the V3 engine was tested with 2.37) | `AGENTMASTER_KIRO_PATH` | `~/.local/bin/kiro-cli`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
 
 ## Download
 

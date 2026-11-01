@@ -73,7 +73,8 @@ extension AgentKind {
         if hooksEnabled(preferences: request.preferences) {
             guard let hook = request.paths.hookExecutable() else { throw AgentLaunchError.hookHelperMissing }
             let plan = HookPlan(hookExecutable: hook, sessionId: request.sessionId,
-                                paths: request.paths, projectPath: request.projectPath)
+                                paths: request.paths, projectPath: request.projectPath,
+                                preferences: request.preferences, environment: request.environment)
             hookArgs = try hookArguments(for: plan)
             hookEnv = hookEnvironment(for: plan)
         }
@@ -124,12 +125,18 @@ public struct HookPlan {
     public let sessionId: String
     public let paths: AppPaths
     public let projectPath: String?
+    /// The launch's settings and environment, for an agent whose hook setup depends on them.
+    public let preferences: AgentPreferences
+    public let environment: [String: String]
 
-    public init(hookExecutable: String, sessionId: String, paths: AppPaths, projectPath: String?) {
+    public init(hookExecutable: String, sessionId: String, paths: AppPaths, projectPath: String?,
+                preferences: AgentPreferences = AgentPreferences(), environment: [String: String] = [:]) {
         self.hookExecutable = hookExecutable
         self.sessionId = sessionId
         self.paths = paths
         self.projectPath = projectPath
+        self.preferences = preferences
+        self.environment = environment
     }
 
     /// The shell command for `agentmaster-hook hook`.

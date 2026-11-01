@@ -48,6 +48,33 @@ final class TranscriptTests: XCTestCase {
         XCTAssertEqual(KiroAgent().transcript(at: dir.appendingPathComponent("s.json").path).first, .user("Sort the rows"))
     }
 
+    /// Recorded from kiro-cli 2.37 on the V3 engine, without its system prompt and context snapshots.
+    func testKiroV3KeepsPromptsRepliesAndToolsButNotReasoning() throws {
+        let entries = TranscriptParser.kiroV3(try fixture("kiro-v3-transcript"))
+        guard case let .user(prompt) = entries.first else { return XCTFail("\(entries)") }
+        XCTAssertTrue(prompt.hasPrefix("Do exactly these steps"))
+        XCTAssertEqual(entries.last, .assistant("FINISHED"))
+        XCTAssertFalse(entries.contains(.assistant("...")), "reasoning is not a reply")
+        let tools = entries.compactMap { entry -> String? in
+            if case let .tool(name, _, _) = entry { return name } else { return nil }
+        }
+        XCTAssertEqual(tools, ["fs_write", "str_replace", "fs_append", "execute_bash", "grep_search", "file_search", "delete_file"])
+        guard case let .tool(_, input, id) = entries[1], case let .toolResult(result, resultId) = entries[2] else {
+            return XCTFail("\(entries)")
+        }
+        XCTAssertTrue(input.contains("notes.txt"), input)
+        XCTAssertEqual(result, "Created the /private/tmp/kiro-lab-v3/proj/notes.txt file.")
+        XCTAssertEqual(resultId, id)
+    }
+
+    func testKiroReadsAV3ConversationAtTheReportedPath() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kiro-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try fixture("kiro-v3-transcript").write(to: dir.appendingPathComponent("messages.jsonl"))
+        XCTAssertEqual(KiroAgent().transcript(at: dir.appendingPathComponent("messages.jsonl").path).last, .assistant("FINISHED"))
+    }
+
     func testConversationLabelsEachEntryAndCutsLongParts() {
         let text = SessionSummary.conversation([
             .user("hi"), .tool(name: "Bash", input: "ls"),

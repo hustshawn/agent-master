@@ -18,3 +18,4 @@
 | [0011](0011-web-edition.md) | Web 版：agentmaster-server + 浏览器界面 | 已接受 |
 | [0012](0012-kiro-agent.md) | 接入 Kiro CLI 作为第三个 agent | 已接受 |
 | [0013](0013-cross-device-control.md) | 跨端协作：聊天视图、远程审批和手机推送 | 已接受 |
+| [0014](0014-kiro-v3-engine.md) | 支持 Kiro CLI 的 V3 引擎 | 已接受 |

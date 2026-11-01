@@ -6,6 +6,8 @@ import AgentMasterCore
 public struct HookTranslator {
     private let dialect: any HookDialect
     private var sessionId: String?
+    /// The conversation a SessionStart (reported or made up below) last started.
+    private var startedSessionId: String?
     private var permissionMode: String?
     /// TaskCreate/TaskUpdate are deltas, so the full list is rebuilt here.
     private var todos: [TodoItem] = []
@@ -23,6 +25,14 @@ public struct HookTranslator {
         }
 
         var events: [SessionEvent] = []
+        // Kiro's V3 engine reports no SessionStart for a resumed conversation: its first hook starts it instead.
+        if event == "SessionStart" {
+            startedSessionId = sessionId
+        } else if let sessionId, sessionId != startedSessionId {
+            startedSessionId = sessionId
+            events.append(.sessionStarted(agentSessionId: sessionId, cwd: payload["cwd"]?.stringValue ?? "",
+                                          transcriptPath: payload["transcript_path"]?.stringValue))
+        }
         if let mode = payload["permission_mode"]?.stringValue, mode != permissionMode {
             permissionMode = mode
             events.append(.permissionModeChanged(mode))

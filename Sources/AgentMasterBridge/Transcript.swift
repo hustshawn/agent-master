@@ -96,6 +96,26 @@ public enum TranscriptParser {
         }
     }
 
+    /// Kiro's V3 engine: `messages.jsonl`, each entry's `payload` one prompt, reply, reasoning step, tool call or result.
+    public static func kiroV3(_ data: Data) -> [TranscriptEntry] {
+        lines(data).compactMap { line -> TranscriptEntry? in
+            guard let entry = line["payload"] else { return nil }
+            switch entry["type"]?.stringValue {
+            case "user":
+                return prompt(entry["content"]?.stringValue ?? "").map(TranscriptEntry.user)
+            case "assistant" where entry["operationType"]?.stringValue != "Reasoning":
+                return nonEmpty(entry["content"]?.stringValue).map(TranscriptEntry.assistant)
+            case "tool_call":
+                return .tool(name: entry["toolName"]?.stringValue ?? "tool", input: compact(entry["args"]),
+                             id: entry["toolCallId"]?.stringValue)
+            case "tool_result":
+                return .toolResult(text(of: entry["content"]), id: entry["toolCallId"]?.stringValue)
+            default:
+                return nil
+            }
+        }
+    }
+
     private static func lines(_ data: Data) -> [JSONValue] {
         data.split(separator: UInt8(ascii: "\n")).compactMap { try? JSONValue.parse(Data($0)) }
     }

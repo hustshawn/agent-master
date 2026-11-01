@@ -342,10 +342,11 @@ function pendingRequestsFor(sessionId) {
   return [...state.requests.values()].filter((r) => r.sessionId === sessionId && r.status === "pending");
 }
 
-/// "needsAttention" (needs you, including a startup that seems stuck), "running" (in progress), "review"
+/// "needsAttention" (needs you, including a startup stuck on a question in its terminal), "running" (in progress), "review"
 /// (a turn ended, not yet marked), "reviewed" (marked), "new" (idle, nothing asked yet) or "stopped" (ended).
 function sessionPhase(session) {
-  if (session.status === "needsAttention" || pendingRequestsFor(session.id).length || isStalled(session)) return "needsAttention";
+  if (session.status === "needsAttention" || pendingRequestsFor(session.id).length || session.waitingInTerminal ||
+      isStalled(session)) return "needsAttention";
   if (session.status === "running" || session.status === "starting") return "running";
   if (session.status === "ended") return "stopped";
   if (!session.hasConversation) return "new";
@@ -425,8 +426,9 @@ function requestPreviewText(request) {
 
 function needsYouCard(session) {
   const requests = pendingRequestsFor(session.id);
+  const waiting = !requests.length && session.waitingInTerminal;
   const stalled = !requests.length && isStalled(session);
-  const preview = requests.length ? requestPreviewText(requests[0])
+  const preview = requests.length ? requestPreviewText(requests[0]) : waiting ? WAITING_HINT
     : stalled ? "No activity since launch. " + STALLED_HINT : session.state.attentionMessage ?? session.subtitle;
   const current = session.id === state.selectedId;
   return el("div", { class: "needs-you-card" + (current ? " selected" : ""), "aria-current": current ? "true" : null },
@@ -434,7 +436,7 @@ function needsYouCard(session) {
        el("span", { class: "agent-name" }, agentLabel(agentFor(session), session.agentName))),
     el("h3", {}, displayTitle(session)),
     el("p", {}, preview),
-    stalled
+    waiting || stalled
       ? el("button", { class: "primary", type: "button", onclick: () => { select(session.id); showView(session, "terminal"); } },
            "Open Terminal", icon("arrow-right"))
       : el("button", { class: "primary", type: "button", onclick: () => select(session.id) }, "View and reply", icon("arrow-right")));
@@ -1146,6 +1148,12 @@ function groupChatItems(items) {
 
 /// What an empty conversation means: still loading, failed to load, stuck at startup, or simply nothing yet.
 function emptyConversation(session) {
+  if (session.waitingInTerminal) {
+    return el("div", { class: "silent-notice" },
+      el("strong", {}, `${session.agentName} is waiting for you in its terminal`),
+      el("p", {}, WAITING_HINT),
+      el("button", { type: "button", class: "primary", onclick: () => showView(session, "terminal") }, "Open Terminal"));
+  }
   if (isStalled(session)) {
     return el("div", { class: "silent-notice" },
       el("strong", {}, `${session.agentName} hasn't reported anything yet`),
@@ -1319,6 +1327,8 @@ function watchStartup(session) {
 }
 
 const STALLED_HINT = "It may be waiting for a confirmation in its terminal, such as trusting this folder.";
+/// For `waitingInTerminal`: the server saw a startup menu in the terminal. A message's Enter would pick its default.
+const WAITING_HINT = "It's asking something in its terminal, such as whether to trust this folder. Answer it there, then come back to Chat.";
 
 function showView(session, view) {
   localStorage.setItem("am.view." + session.id, view);
@@ -1331,7 +1341,7 @@ function renderComposer(session) {
     autosizeComposer($("composer-text"));
     lastComposerSessionId = session.id;
   }
-  const idle = session.status === "idle";
+  const idle = session.status === "idle" && !session.waitingInTerminal;
   const sending = state.sending.has(session.id);
   const list = attachmentsFor(session.id);
   const blocked = list.some((a) => a.status !== "ready");
@@ -1348,6 +1358,9 @@ function renderComposer(session) {
     status.textContent = "You're offline. Your message is kept and can be sent once the connection is back.";
   } else if (sending) {
     status.textContent = list.length ? "Sending message and attachments…" : "Sending message…";
+  } else if (session.waitingInTerminal) {
+    status.replaceChildren(`${session.agentName} is waiting for an answer in its terminal. `,
+      el("button", { type: "button", class: "link", onclick: () => showView(session, "terminal") }, "Open Terminal"));
   } else if (error) {
     status.textContent = error;
   } else if (session.status === "running" || session.status === "needsAttention") {

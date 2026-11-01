@@ -422,4 +422,40 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertEqual(manager.list().first?.status, "idle")
         XCTAssertEqual(try manager.send(sessionId: session.id, messageId: "m3", text: "more").status, "written")
     }
+
+    func testAMenuInTheTerminalAtStartupHoldsMessagesUntilItIsAnswered() throws {
+        let manager = try makeManager()
+        let created = try manager.create(projectPath: project)
+        let session = try XCTUnwrap(manager.session(id: created.id))
+        let output = Output()
+        _ = session.process.subscribe { output.append($0) }
+        // Kiro reports itself ready, then asks in its terminal; the stand-in agent echoes the menu's key hints.
+        // The terminal shows each line twice: its own echo, then the agent's.
+        func showMenu() {
+            let shown = output.text.components(separatedBy: "to navigate").count
+            session.process.write(Data("\u{1b}[2m↑↓ to navigate · ↵ to select\u{1b}[0m\n".utf8))
+            XCTAssertTrue(wait { output.text.components(separatedBy: "to navigate").count == shown + 2 }, output.text)
+        }
+        try hook(manager, created.id, ["hook_event_name": "SessionStart", "session_id": "k1", "cwd": .string(project)])
+        XCTAssertTrue(wait { manager.list().first?.status == "idle" })
+        XCTAssertFalse(session.json.waitingInTerminal)
+        showMenu()
+        XCTAssertTrue(session.json.waitingInTerminal)
+        // A message's Enter would pick the menu's default choice (Kiro's "No, exit").
+        XCTAssertThrowsError(try manager.send(sessionId: created.id, messageId: "m1", text: "hi")) { error in
+            XCTAssertTrue("\(error)".contains("terminal"), "\(error)")
+        }
+
+        session.terminalInput(Data("\u{1b}[B".utf8))
+        XCTAssertTrue(session.json.waitingInTerminal, "moving through the menu does not answer it")
+        session.terminalInput(Data("\r".utf8))
+        XCTAssertFalse(session.json.waitingInTerminal)
+        XCTAssertEqual(try manager.send(sessionId: created.id, messageId: "m1", text: "hi").status, "written")
+
+        // From the first prompt on, the agent's dialogs come with hooks; the terminal is no longer watched.
+        try hook(manager, created.id, ["hook_event_name": "UserPromptSubmit", "session_id": "k1", "prompt": "hi"])
+        XCTAssertTrue(wait { manager.list().first?.status == "running" })
+        showMenu()
+        XCTAssertFalse(session.json.waitingInTerminal)
+    }
 }

@@ -290,6 +290,10 @@ public final class SessionManager: @unchecked Sendable {
             }
             return attachment
         }
+        // Its Enter would pick the menu's default choice, which can end the session.
+        if session.waitingInTerminal {
+            throw MessageError.busy("\(session.agent.displayName) is waiting for an answer in its terminal. Answer it there first.")
+        }
         return try messages.send(id: messageId, sessionId: sessionId, text: text, attachments: attached,
                                  idle: session.state.status == .idle) {
             session.process.write($0)

@@ -307,12 +307,12 @@ enum TerminalBridge {
                     case .text(let text):
                         guard let control = try? JSONDecoder().decode(Control.self, from: Data(text.utf8)) else { continue }
                         if control.type == "input", let data = control.data {
-                            session.process.write(Data(data.utf8))
+                            session.terminalInput(Data(data.utf8))
                         } else if control.type == "resize", let columns = control.columns, let rows = control.rows {
                             session.process.resize(columns: columns, rows: rows)
                         }
                     case .binary(var buffer):
-                        if let bytes = buffer.readBytes(length: buffer.readableBytes) { session.process.write(Data(bytes)) }
+                        if let bytes = buffer.readBytes(length: buffer.readableBytes) { session.terminalInput(Data(bytes)) }
                     }
                 }
             }

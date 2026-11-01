@@ -21,6 +21,8 @@ public struct SessionJSON: Codable, Equatable, Sendable {
     public let reviewed: Bool
     /// It has had a prompt, here or before a restore resumed it; an idle session without one has not started.
     public let hasConversation: Bool
+    /// The agent shows a menu at startup that only its terminal can answer, such as trusting the folder.
+    public let waitingInTerminal: Bool
     public let state: StateJSON
 }
 

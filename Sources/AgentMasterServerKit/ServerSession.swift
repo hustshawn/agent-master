@@ -20,6 +20,8 @@ public final class ServerSession: @unchecked Sendable {
     private var _reviewed: Bool
     /// When the agent last did something (not counting status-line usage updates).
     private var lastActivityAt = Date()
+    /// Until the first prompt, whether the terminal shows a menu Chat cannot answer; nil from then on.
+    private var startupMenu: StartupMenuWatch? = StartupMenuWatch()
     /// Called after any change a browser should see.
     var onChange: (@Sendable () -> Void)?
 
@@ -33,6 +35,37 @@ public final class ServerSession: @unchecked Sendable {
         _customName = customName
         _reviewed = reviewed
         translator = HookTranslator(dialect: agent.hookDialect)
+        let (_, scrollback) = process.subscribe { [weak self] in self?.terminalOutput($0) }
+        terminalOutput(scrollback)
+    }
+
+    /// The agent shows a menu at startup that only its terminal can answer; Chat must not type into it.
+    public var waitingInTerminal: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return startupMenu?.isShowing == true
+    }
+
+    /// Keys typed in a browser's terminal, on their way to the agent.
+    public func terminalInput(_ data: Data) {
+        updateStartupMenu { $0.input(data) }
+        process.write(data)
+    }
+
+    private func terminalOutput(_ data: Data) {
+        updateStartupMenu { $0.output(data) }
+    }
+
+    private func updateStartupMenu(_ update: (inout StartupMenuWatch) -> Void) {
+        lock.lock()
+        let wasShowing = startupMenu?.isShowing
+        if var watch = startupMenu {
+            update(&watch)
+            startupMenu = watch
+        }
+        let changed = startupMenu?.isShowing != wasShowing
+        lock.unlock()
+        if changed { onChange?() }
     }
 
     public var reviewed: Bool {
@@ -98,6 +131,10 @@ public final class ServerSession: @unchecked Sendable {
             if case .usageUpdated = event { continue }
             lastActivityAt = now
             if case .promptSubmitted = event { _reviewed = false }   // a new turn has nothing reviewed yet
+            switch event {
+            case .promptSubmitted, .sessionEnded: startupMenu = nil   // from here on its dialogs come with hooks
+            default: break
+            }
         }
         lock.unlock()
         onChange?()
@@ -109,6 +146,7 @@ public final class ServerSession: @unchecked Sendable {
         let customName = _customName
         let reviewed = _reviewed
         let lastActivityAt = self.lastActivityAt
+        let waitingInTerminal = startupMenu?.isShowing == true
         lock.unlock()
         let label = agent.id == AgentRegistry.defaultAgent.id ? nil : agent.displayName
         return SessionJSON(
@@ -119,7 +157,7 @@ public final class ServerSession: @unchecked Sendable {
             createdAt: createdAt.timeIntervalSince1970, lastActivityAt: lastActivityAt.timeIntervalSince1970,
             reviewed: reviewed,
             hasConversation: state.firstPrompt != nil || state.lastMessage != nil || resumeHint != nil,
-            state: StateJSON(state))
+            waitingInTerminal: waitingInTerminal, state: StateJSON(state))
     }
 
     var snapshot: OpenSessionSnapshot {

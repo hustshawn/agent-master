@@ -15,6 +15,7 @@ public final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         super.init()
         TerminalPalette.apply(to: view)
         view.workingDirectory = launch.currentDirectory
+        view.registerForDraggedTypes([.fileURL])   // files dropped from Finder; see AgentTerminalView
         view.processDelegate = self
         view.startProcess(executable: launch.executable, args: launch.args, environment: launch.environmentStrings,
                           execName: nil, currentDirectory: launch.currentDirectory)

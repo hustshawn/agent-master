@@ -48,7 +48,7 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
 
   <img src="docs/images/new-session.png" width="420" alt="The new-session panel with Claude Code, Codex and Kiro to pick from, a model picker and a project picker">
 
-- **Open a folder from Finder.** Right-click a folder in Finder and choose Services → Open in AgentMaster, or drop it on AgentMaster's Dock icon. The new-session panel opens with that folder as the project.
+- **Open a folder from Finder.** Right-click a folder in Finder and choose Services → Open in AgentMaster, or drop it on AgentMaster's Dock icon. The new-session panel opens with that folder as the project. Files and folders dropped on a session's terminal are typed in as their paths, as Terminal does.
 
 - **Restore on launch.** Sessions that were open when you quit come back and resume their conversations.
 - **Review inspector.** A collapsible side panel (⌥⌘0) shows todos, subagents and file changes for the selected session.

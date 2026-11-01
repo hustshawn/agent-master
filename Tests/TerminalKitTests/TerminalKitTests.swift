@@ -73,6 +73,15 @@ final class TerminalKitTests: XCTestCase {
         XCTAssertNil(AgentTerminalView.pasteInput(pasteboard: pasteboard, kittyKeyboard: true))
     }
 
+    func testDroppedFilesAreTypedAsEscapedPaths() {
+        let urls = [URL(fileURLWithPath: "/Users/me/My Project (1)", isDirectory: true),
+                    URL(fileURLWithPath: "/tmp/视频/a'b.txt")]
+        XCTAssertEqual(AgentTerminalView.dropInput(for: urls, bracketedPaste: false),
+                       #"/Users/me/My\ Project\ \(1\) /tmp/视频/a\'b.txt "#)
+        XCTAssertEqual(AgentTerminalView.dropInput(for: [URL(fileURLWithPath: "/tmp/x")], bracketedPaste: true),
+                       "\u{1b}[200~/tmp/x \u{1b}[201~")
+    }
+
     func testClickedPathsOpenAsFilesInTheSessionDirectory() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("am-link-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: dir.appendingPathComponent("Sources"), withIntermediateDirectories: true)

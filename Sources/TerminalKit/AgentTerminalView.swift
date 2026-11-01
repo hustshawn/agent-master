@@ -28,6 +28,32 @@ public final class AgentTerminalView: LocalProcessTerminalView {
         allowMouseReporting = !selection.active
     }
 
+    /// Files and folders dropped from Finder are typed in as their paths, the way Terminal does it.
+    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        Self.fileURLs(on: sender.draggingPasteboard).isEmpty ? [] : .copy
+    }
+
+    public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = Self.fileURLs(on: sender.draggingPasteboard)
+        guard !urls.isEmpty else { return false }
+        send(txt: Self.dropInput(for: urls, bracketedPaste: getTerminal().bracketedPasteMode))
+        return true
+    }
+
+    private static func fileURLs(on pasteboard: NSPasteboard) -> [URL] {
+        pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    }
+
+    /// Each path with shell metacharacters backslash-escaped and a trailing space, as Terminal types a dropped file;
+    /// inside a bracketed paste when the agent turned that on, so it reads the paths as pasted rather than typed.
+    static func dropInput(for urls: [URL], bracketedPaste: Bool) -> String {
+        let text = urls.map { url in
+            url.path.map { $0.isASCII && !($0.isLetter || $0.isNumber || "/._-+,:@%=".contains($0)) ? "\\\($0)" : "\($0)" }
+                .joined()
+        }.joined(separator: " ") + " "
+        return bracketedPaste ? "\u{1b}[200~\(text)\u{1b}[201~" : text
+    }
+
     /// SwiftTerm opens a clicked path with `URL(string:)`, and a URL with no scheme fails in Finder with -50.
     public override func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
         if let url = Self.linkURL(link, relativeTo: workingDirectory) {

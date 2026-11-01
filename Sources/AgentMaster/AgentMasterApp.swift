@@ -9,11 +9,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Needed when launched as a bare SwiftPM executable (`swift run AgentMaster`).
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // Serves Finder's right-click "Open in AgentMaster" (NSServices in Info.plist); the update makes
+        // the system pick the item up even when the app was not launched from /Applications.
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
     }
 
     /// A lone `Window` scene quits the app when closed, which would kill every running claude session.
     /// Keep running; the window is reopened from the Dock or the Window menu.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Folders dropped on the Dock icon, or `open -a AgentMaster <folder>`.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        showNewSession(inFirstFolderOf: urls)
+    }
+
+    /// The "Open in AgentMaster" service on folders selected in Finder.
+    @objc func openInAgentMaster(_ pasteboard: NSPasteboard, userData: String?,
+                                 error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        showNewSession(inFirstFolderOf: urls ?? [])
+    }
+
+    /// The new-session panel, set to the first folder.
+    private func showNewSession(inFirstFolderOf urls: [URL]) {
+        guard let folder = urls.first(where: { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true })
+        else { return }
+        MainActor.assumeIsolated { model.showNewSession(project: folder.path) }
+    }
 
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { model.shutdown() }

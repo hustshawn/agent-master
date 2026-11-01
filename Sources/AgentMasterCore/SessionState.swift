@@ -130,6 +130,9 @@ public struct SessionState: Equatable, Sendable {
             setStatus(.idle)
             lastActivityAt = now
 
+        case .inputReady:
+            if status == .starting { status = .idle }
+
         case .sessionEnded(let reason):
             runningTools = []
             attentionMessage = nil

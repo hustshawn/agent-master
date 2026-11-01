@@ -36,12 +36,13 @@ final class SessionManagerTests: XCTestCase {
         return url.path
     }
 
-    private func makeManager() throws -> SessionManager {
+    private func makeManager(_ environment: [String: String] = [:]) throws -> SessionManager {
         let manager = try SessionManager(.init(
             dataDirectory: root.appendingPathComponent("data"),
             executableURL: root.appendingPathComponent("server/agentmaster-server"),
             environment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory(),
-                          "AGENTMASTER_CLAUDE_PATH": root.appendingPathComponent("bin/claude").path],
+                          "AGENTMASTER_CLAUDE_PATH": root.appendingPathComponent("bin/claude").path]
+                .merging(environment) { $1 },
             pushTransport: pushes))
         managers.append(manager)
         return manager
@@ -421,6 +422,20 @@ final class SessionManagerTests: XCTestCase {
         try manager.interrupt(sessionId: session.id)
         XCTAssertEqual(manager.list().first?.status, "idle")
         XCTAssertEqual(try manager.send(sessionId: session.id, messageId: "m3", text: "more").status, "written")
+    }
+
+    func testKirosEmptyPromptOnScreenLetsChatSendBeforeKiroReportsAnything() throws {
+        try script("bin/kiro-cli", "#!/bin/sh\nexec cat\n")
+        // A scratch HOME: launching Kiro writes its V3 hooks file into ~/.kiro.
+        let manager = try makeManager(["HOME": root.path, "AGENTMASTER_KIRO_PATH": root.appendingPathComponent("bin/kiro-cli").path])
+        let created = try manager.create(projectPath: project, agentId: "kiro")
+        let session = try XCTUnwrap(manager.session(id: created.id))
+        XCTAssertEqual(session.json.status, "starting")
+        XCTAssertThrowsError(try manager.send(sessionId: created.id, messageId: "m0", text: "hi"), "not ready for a prompt")
+        // Kiro's V3 engine sends its first hook with the first prompt; the stand-in echoes the prompt V3 draws.
+        session.process.write(Data("\u{1b}[2m› ask a question or describe a task ↵\u{1b}[0m\n".utf8))
+        XCTAssertTrue(wait { session.json.status == "idle" }, session.json.status)
+        XCTAssertEqual(try manager.send(sessionId: created.id, messageId: "m1", text: "hi").status, "written")
     }
 
     func testAMenuInTheTerminalAtStartupHoldsMessagesUntilItIsAnswered() throws {

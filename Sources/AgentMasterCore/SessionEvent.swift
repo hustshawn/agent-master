@@ -16,4 +16,7 @@ public enum SessionEvent: Equatable, Sendable {
     case needsAttention(message: String)
     case turnFinished(lastMessage: String?)
     case sessionEnded(reason: String?)
+    /// The agent's empty prompt is on screen before it reported anything (Kiro's V3 engine sends its first hook with
+    /// the first prompt); moves a starting session to idle.
+    case inputReady
 }

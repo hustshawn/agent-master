@@ -21,7 +21,7 @@ public final class ServerSession: @unchecked Sendable {
     /// When the agent last did something (not counting status-line usage updates).
     private var lastActivityAt = Date()
     /// Until the first prompt, whether the terminal shows a menu Chat cannot answer; nil from then on.
-    private var startupMenu: StartupMenuWatch? = StartupMenuWatch()
+    private var startupMenu: StartupMenuWatch?
     /// Called after any change a browser should see.
     var onChange: (@Sendable () -> Void)?
 
@@ -35,6 +35,7 @@ public final class ServerSession: @unchecked Sendable {
         _customName = customName
         _reviewed = reviewed
         translator = HookTranslator(dialect: agent.hookDialect)
+        startupMenu = StartupMenuWatch(promptHints: agent.promptHints)
         let (_, scrollback) = process.subscribe { [weak self] in self?.terminalOutput($0) }
         terminalOutput(scrollback)
     }
@@ -58,14 +59,19 @@ public final class ServerSession: @unchecked Sendable {
 
     private func updateStartupMenu(_ update: (inout StartupMenuWatch) -> Void) {
         lock.lock()
-        let wasShowing = startupMenu?.isShowing
+        let before = startupMenu
         if var watch = startupMenu {
             update(&watch)
             startupMenu = watch
         }
-        let changed = startupMenu?.isShowing != wasShowing
+        let changed = startupMenu?.isShowing != before?.isShowing
+        let ready = startupMenu?.isPromptReady == true && before?.isPromptReady == false && _state.status == .starting
         lock.unlock()
-        if changed { onChange?() }
+        if ready {
+            apply([.inputReady])
+        } else if changed {
+            onChange?()
+        }
     }
 
     public var reviewed: Bool {

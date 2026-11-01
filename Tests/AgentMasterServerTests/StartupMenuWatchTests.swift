@@ -37,4 +37,18 @@ final class StartupMenuWatchTests: XCTestCase {
         watch.output(Data("Enter to confirm · Esc to cancel".utf8))
         XCTAssertTrue(watch.isShowing)
     }
+
+    func testAnEmptyPromptOnScreenMeansReadyUnlessAMenuIsUp() {
+        var watch = StartupMenuWatch(promptHints: ["ask a question or describe a task"])
+        watch.output(Data("⠋ Launching...\r\n".utf8))
+        XCTAssertFalse(watch.isPromptReady)
+        // Kiro V2's trust-all-tools warning is drawn over its prompt: the menu comes first.
+        watch.output(Data("› ask a question or describe a task ↵\r\nesc to cancel · ↑↓ to navigate · ↵ to select".utf8))
+        XCTAssertTrue(watch.isShowing)
+        XCTAssertFalse(watch.isPromptReady)
+        watch.input(Data("\r".utf8))
+        watch.output(Data("\u{1b}[2m›\u{1b}[0m ask a question\u{1b}[1C or describe a task ↵".utf8))
+        XCTAssertTrue(watch.isPromptReady)
+        XCTAssertFalse(StartupMenuWatch().isPromptReady, "an agent without prompt hints is never ready this way")
+    }
 }

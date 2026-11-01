@@ -134,6 +134,16 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(state.lastActivityAt, t0.addingTimeInterval(5), "a new conversation keeps it")
     }
 
+    func testInputReadyOnlyMovesAStartingSessionToIdle() {
+        var state = SessionState()
+        state.apply(.inputReady)
+        XCTAssertEqual(state.status, .idle)
+        state.apply(.promptSubmitted(text: "hi"))
+        state.apply(.inputReady)
+        XCTAssertEqual(state.status, .running, "a late one changes nothing")
+        XCTAssertNil(state.agentSessionId)
+    }
+
     func testOnlyWorkingSessionsNeedCloseConfirmation() {
         XCTAssertTrue(SessionStatus.running.needsCloseConfirmation)
         XCTAssertTrue(SessionStatus.needsAttention.needsCloseConfirmation)

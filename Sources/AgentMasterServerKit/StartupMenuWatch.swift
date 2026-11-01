@@ -12,9 +12,17 @@ struct StartupMenuWatch {
     /// CSI, OSC, charset and other two-character escape sequences.
     private static let escapeSequence = #"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[()][0-9A-Za-z]|[@-_])"#
 
+    /// The agent's `promptHints`, without whitespace.
+    private let promptHints: [String]
     /// What the agent printed since the menu was last answered.
     private var tail = Data()
     private(set) var isShowing = false
+    /// Its empty prompt has been on screen with no menu over it.
+    private(set) var isPromptReady = false
+
+    init(promptHints: [String] = []) {
+        self.promptHints = promptHints.map { $0.filter { !$0.isWhitespace } }
+    }
 
     mutating func output(_ data: Data) {
         guard !isShowing else { return }
@@ -24,6 +32,7 @@ struct StartupMenuWatch {
             .replacingOccurrences(of: Self.escapeSequence, with: "", options: .regularExpression)
             .filter { !$0.isWhitespace }
         isShowing = Self.hints.contains { text.contains($0) }
+        if !isShowing, promptHints.contains(where: { text.contains($0) }) { isPromptReady = true }
     }
 
     /// Enter, Esc or a digit answers a menu; the agent draws it again if it is still there. Arrow keys, typed text

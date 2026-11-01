@@ -48,11 +48,17 @@ V3 下侧边栏一直停在 starting / Needs you，终端里对话却正常。�
 - **`HookTranslator`**：一个会话的第一个 hook 如果不是 SessionStart，先补一个 SessionStart。只有 V3 恢复的会话会这样，
   Claude Code、Codex 和 Kiro V2 的第一个 hook 都是 SessionStart。
 - **`TranscriptParser.kiroV3`** 读 `messages.jsonl`；`KiroAgent.transcript(at:)` 按文件名分辨 V2 和 V3。
+- **认出空的输入框**：`AgentKind` 增加 `promptHints`，Kiro 是 "ask a question or describe a task" 和 "type to queue a message"
+  （V2、V3 都一样；初始化期间打的字 Kiro 会先排队）。服务端的 StartupMenuWatch 在第一条 prompt 之前顺带认这两句：
+  屏幕上有它、又没有启动菜单时，发一个新的 `SessionEvent.inputReady`，把还在 starting 的会话改成 idle，web 里就能在 Chat
+  里发第一条消息。
 
 ## 后果
 
 - V3 会话有状态、标题、正在运行的工具、CHANGES、web 的聊天视图和恢复，和 V2 一样。
-- 和 Codex 一样，新的 V3 会话在第一条消息之前显示 starting，web 里第一条消息要在 Terminal 里发。
+- web 版里，新的 V3 会话一出现输入框就是 idle，第一条消息能在 Chat 里发；会话 id 和对话记录要到第一条 prompt 才有。
+  Kiro 改了输入框的提示语就认不出来，退回第一条消息之前一直 starting、要在 Terminal 里发。Mac app 没有这个判断，侧边栏
+  在第一条消息之前显示 starting。Codex 也是第一条消息才报告，它输入框里的提示会不会变还没核实，这次没加。
 - `agentmaster.json` 不会被删掉。AgentMaster 之外的 V3 会话，每个事件多跑一个立刻退出的 `sh`。
 - 找 V3 对话记录用的是 AgentMaster 进程自己的 `KIRO_HOME`：服务端是启动它的那个环境；Mac app 从 Finder 启动看不到
   shell 里的 `KIRO_HOME`，这时会去 `~/.kiro` 找，设了 `KIRO_HOME` 的人在 Mac app 里看不到 V3 的对话记录。

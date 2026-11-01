@@ -19,6 +19,9 @@ public protocol AgentKind: Sendable {
     var reportsUsage: Bool { get }
     /// Maps this agent's hook payloads onto the Claude Code shape HookTranslator reads.
     var hookDialect: any HookDialect { get }
+    /// Text the agent's empty prompt shows, for one that reports nothing before its first prompt: once it is on
+    /// screen, a prompt can be typed.
+    var promptHints: [String] { get }
 
     /// Declared settings; the default-model option, if any, uses `AgentOption.modelId`.
     func options(environment: [String: String]) -> [AgentOption]
@@ -51,6 +54,7 @@ extension AgentKind {
     public var supportsResume: Bool { false }
     public var reportsUsage: Bool { false }
     public var hookDialect: any HookDialect { ClaudeHookDialect() }
+    public var promptHints: [String] { [] }
     public func isForcedOn(optionId: String, preferences: AgentPreferences) -> Bool { false }
     public func hooksEnabled(preferences: AgentPreferences) -> Bool { false }
     public func hookArguments(for plan: HookPlan) throws -> [String] { [] }

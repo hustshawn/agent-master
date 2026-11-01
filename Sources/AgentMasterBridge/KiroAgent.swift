@@ -30,6 +30,8 @@ public struct KiroAgent: AgentKind {
     public let shortcut: AgentShortcut? = AgentShortcut(key: "n", control: true)
     public var supportsResume: Bool { true }
     public var hookDialect: any HookDialect { KiroHookDialect() }
+    /// The V3 engine's first hook comes with the first prompt. While it starts, what is typed waits in its queue.
+    public var promptHints: [String] { ["ask a question or describe a task", "type to queue a message"] }
 
     public init() {}
 

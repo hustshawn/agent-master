@@ -1,7 +1,7 @@
 // AgentMaster web UI. Talks to agentmaster-server's /api (see WebServer.swift). No build step.
 "use strict";
 
-const TODO = { completed: ["✓", "#a6e3a1"], in_progress: ["◆", "#8abeb7"], pending: ["◇", "#8a9098"] };
+const TODO = { completed: ["✓", "var(--success)"], in_progress: ["◆", "var(--teal)"], pending: ["◇", "var(--muted)"] };
 const CUSTOM = "\u0000custom";
 
 const $ = (id) => document.getElementById(id);
@@ -696,6 +696,58 @@ $("sidebar-resizer").addEventListener("pointerdown", (event) => {
   }, { once: true });
 });
 
+// MARK: appearance — System, Light or Dark (Settings → General), remembered per browser like the sidebar width.
+// The inline script in index.html sets data-theme before the first paint; this keeps it, the theme-color and every
+// open terminal in step, and follows the device while the choice is System.
+
+const APPEARANCES = [["system", "System"], ["light", "Light"], ["dark", "Dark"]];
+const TERMINAL_THEMES = {
+  dark: { background: "#1e1e22", foreground: "#ccd3db", cursor: "#ccd3db", selectionBackground: "#263854",
+          black: "#2a2a30", red: "#f38ba8", green: "#a6e3a1", yellow: "#ffe14a", blue: "#5aa0ff", magenta: "#c5a3ff",
+          cyan: "#8abeb7", white: "#ccd3db", brightBlack: "#676c74", brightRed: "#ff9eb8", brightGreen: "#b5e8b0",
+          brightYellow: "#fff08a", brightBlue: "#8cbcff", brightMagenta: "#d7bfff", brightCyan: "#a8d8d2",
+          brightWhite: "#ffffff" },
+  // White and bright white stay mid-grey: TUIs drawn for a dark terminal use them for ordinary text.
+  light: { background: "#f6f7f9", foreground: "#1f2328", cursor: "#1f2328", selectionBackground: "#b6d4fe",
+           black: "#24292f", red: "#cf222e", green: "#116329", yellow: "#7d4e00", blue: "#0969da", magenta: "#8250df",
+           cyan: "#1b7c83", white: "#6e7781", brightBlack: "#57606a", brightRed: "#a40e26", brightGreen: "#1a7f37",
+           brightYellow: "#633c01", brightBlue: "#218bff", brightMagenta: "#a475f9", brightCyan: "#3192aa",
+           brightWhite: "#8c959f" },
+};
+const systemPrefersLight = matchMedia("(prefers-color-scheme: light)");
+
+/// "system", "light" or "dark"; Dark until changed, as before there was a choice.
+function appearance() {
+  return localStorage.getItem("am.appearance") ?? "dark";
+}
+
+function currentTheme() {
+  const choice = appearance();
+  return choice === "system" ? (systemPrefersLight.matches ? "light" : "dark") : choice;
+}
+
+function applyAppearance() {
+  const theme = currentTheme();
+  document.documentElement.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]').content = TERMINAL_THEMES[theme].background;
+  for (const entry of state.terminals.values()) entry.term.options.theme = TERMINAL_THEMES[theme];
+}
+
+function setAppearance(choice) {
+  localStorage.setItem("am.appearance", choice);
+  applyAppearance();
+}
+
+/// A small window in the choice's own theme; System shows both, split down the middle.
+function appearancePreview(choice) {
+  const layer = (theme) => el("span", { class: theme }, el("i"));
+  return el("span", { class: "appearance-preview " + choice, "aria-hidden": "true" },
+    choice === "system" ? [layer("light"), layer("dark")] : layer(choice));
+}
+
+systemPrefersLight.addEventListener("change", applyAppearance);
+applyAppearance();
+
 // MARK: home — shown whenever no valid session is selected. See HOME-SPEC.md and the PR #9 review's "首页"
 // section: a loading state before the first snapshot, a first-run guide with none ever created, otherwise
 // New session plus needs-you items first and up to four recent sessions, sorted by real last activity.
@@ -1273,7 +1325,7 @@ function renderChangesTab(session) {
     s.subagents.map((agent) => {
       const seconds = Math.max(0, Math.round((agent.finishedAt ?? now) - agent.startedAt));
       return el("div", { class: "subagent" },
-        el("span", { style: `color:${agent.finishedAt ? "#a6e3a1" : "#8abeb7"}` }, agent.finishedAt ? "✓" : "◈"),
+        el("span", { style: `color:${agent.finishedAt ? "var(--success)" : "var(--teal)"}` }, agent.finishedAt ? "✓" : "◈"),
         el("span", {}, `${agent.type}${agent.description ? " — " + agent.description : ""} · ${duration(seconds)}`));
     })) : null;
   $("tab-changes").replaceChildren(...[changes, todos, subagents].filter(Boolean));
@@ -1902,13 +1954,7 @@ function showTerminal(session) {
     const node = el("div", { class: "term-pane", onmousedown: () => requestAnimationFrame(() => entry?.term.focus()) });
     $("terminals").append(node);
     const term = new Terminal({ fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', fontSize: 13,
-                                theme: { background: "#1e1e22", foreground: "#ccd3db", cursor: "#ccd3db",
-                                        selectionBackground: "#263854", black: "#2a2a30", red: "#f38ba8",
-                                        green: "#a6e3a1", yellow: "#ffe14a", blue: "#5aa0ff", magenta: "#c5a3ff",
-                                        cyan: "#8abeb7", white: "#ccd3db", brightBlack: "#676c74", brightRed: "#ff9eb8",
-                                        brightGreen: "#b5e8b0", brightYellow: "#fff08a", brightBlue: "#8cbcff",
-                                        brightMagenta: "#d7bfff", brightCyan: "#a8d8d2", brightWhite: "#ffffff" },
-                                cursorBlink: true, allowProposedApi: true, scrollback: 10000,
+                                theme: TERMINAL_THEMES[currentTheme()], cursorBlink: true, allowProposedApi: true, scrollback: 10000,
                                 macOptionIsMeta: true, macOptionClickForcesSelection: true });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
@@ -2097,10 +2143,12 @@ function glyphSVG(glyph, size) {
     add("ellipse", { cx: 53, cy: 40, rx: 3.2, ry: 5.2, fill: "#0d0b12" });
     add("ellipse", { cx: 64.5, cy: 40.1, rx: 3.2, ry: 5.2, fill: "#0d0b12" });
   } else {
-    add("rect", { x: 5, y: 5, width: 90, height: 90, rx: 24, fill: "none", stroke: "#ccd3db", "stroke-width": 6 });
-    add("polyline", { points: "30,36 44,50 30,64", fill: "none", stroke: "#ccd3db", "stroke-width": 8,
+    // A style, not a stroke attribute, so the colour can follow the theme.
+    const stroke = "stroke: var(--terminal-glyph)";
+    add("rect", { x: 5, y: 5, width: 90, height: 90, rx: 24, fill: "none", style: stroke, "stroke-width": 6 });
+    add("polyline", { points: "30,36 44,50 30,64", fill: "none", style: stroke, "stroke-width": 8,
                       "stroke-linecap": "round", "stroke-linejoin": "round" });
-    add("line", { x1: 52, y1: 64, x2: 70, y2: 64, stroke: "#ccd3db", "stroke-width": 8, "stroke-linecap": "round" });
+    add("line", { x1: 52, y1: 64, x2: 70, y2: 64, style: stroke, "stroke-width": 8, "stroke-linecap": "round" });
   }
   return svg;
 }
@@ -2267,7 +2315,7 @@ function settingsOverview() {
     el("button", { class: "settings-agent-row", type: "button",
                   onclick: () => { state.settingsSection = "general"; renderSettings(); } },
       el("span", { class: "general-glyph" }, icon("server")),
-      el("span", {}, el("strong", {}, "General"), el("small", {}, "Session restore, notifications")),
+      el("span", {}, el("strong", {}, "General"), el("small", {}, "Appearance, session restore, notifications")),
       icon("chevron-right")),
     el("p", { class: "settings-overview-note" }, icon("cloud"), state.online ? "Connected" : "Not connected"));
 }
@@ -2331,6 +2379,13 @@ function generalPage() {
     el("header", { class: "settings-agent-header" }, el("span", { class: "general-glyph large" }, icon("server")),
       el("div", {}, el("h1", {}, "General"), el("p", {}, "AgentMaster server"))),
     el("section", { class: "settings-section" },
+      el("div", { class: "setting-row appearance-row" },
+        el("div", { class: "setting-description" }, el("label", { id: "appearance-label" }, "Appearance"),
+          el("p", {}, "For this browser only. System follows your device's light or dark mode.")),
+        el("div", { class: "appearance-choices", role: "radiogroup", "aria-labelledby": "appearance-label" },
+          APPEARANCES.map(([value, label]) => el("button", {
+            type: "button", role: "radio", class: "appearance-choice", "aria-checked": String(appearance() === value),
+            onclick: () => { setAppearance(value); renderSettings(); } }, appearancePreview(value), label)))),
       el("div", { class: "setting-row toggle-row" },
         el("div", { class: "setting-description" }, el("label", {}, "Restore sessions on launch"),
           el("p", {}, "Sessions open when the server stops come back, resuming their conversations.")),

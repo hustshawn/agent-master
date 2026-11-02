@@ -7,6 +7,14 @@
   <link rel="icon" href="icon.png" type="image/png">
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#1e1e22">
+  <!-- The saved Appearance before the stylesheet paints, so a light page never flashes dark (see applyAppearance()). -->
+  <script>
+    (function () {
+      var choice = localStorage.getItem("am.appearance") || "dark";
+      var light = choice === "light" || (choice === "system" && matchMedia("(prefers-color-scheme: light)").matches);
+      document.documentElement.dataset.theme = light ? "light" : "dark";
+    })();
+  </script>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <!-- Not black-translucent: under the status bar, iOS sizes a home-screen app shorter than the screen by
        the status bar's height and leaves a band at the bottom that covers the composer. -->

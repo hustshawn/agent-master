@@ -98,6 +98,8 @@ The web edition is for running agents on a remote server. `agentmaster-server` r
 
 Codex and Kiro take over the mouse in their TUI, so a plain drag does not select text in their sessions. Hold Option while dragging on a Mac, or Shift elsewhere. In the Mac app, hold Shift.
 
+Settings → General → Appearance switches the page, terminal included, between Dark, Light and System (your device's mode), for that browser only. Some colours in a TUI are the agent's own: with Light, also pick a light theme in Claude Code (`/theme`).
+
 ### Install on a Linux server
 
 On the server (x86_64 or aarch64), log in as the user who runs `claude`, `codex` or `kiro-cli` and run:

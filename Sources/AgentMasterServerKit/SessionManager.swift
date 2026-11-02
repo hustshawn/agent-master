@@ -260,7 +260,7 @@ public final class SessionManager: @unchecked Sendable {
     public func chat(sessionId: String, after: Int = 0) throws -> ChatJSON {
         guard let session = session(id: sessionId) else { throw SessionManagerError.unknownSession(sessionId) }
         let entries = session.state.transcriptPath.map(session.agent.transcript(at:)) ?? []
-        return Chat.page(Chat.items(entries), after: after)
+        return Chat.page(Chat.items(entries, toolKind: session.agent.toolKind), after: after)
     }
 
     // MARK: requests and messages

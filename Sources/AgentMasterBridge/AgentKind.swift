@@ -31,6 +31,9 @@ public protocol AgentKind: Sendable {
     func resumeId(from state: SessionState) -> String?
     /// The conversation in the transcript the hooks reported, for a summary; empty if unreadable.
     func transcript(at path: String) -> [TranscriptEntry]
+    /// What a tool call in that transcript does, for its title in the chat: transcripts keep the agent's own tool
+    /// names, which its hooks (see HookDialect) report in Claude Code's.
+    func toolKind(name: String, input: JSONValue) -> ToolKind
     /// The hook output that carries `decision` for the request `payload`, or nil when this agent's requests
     /// are answered in its terminal only (or `decision` does not fit the request).
     func hookOutput(for payload: JSONValue, decision: RemoteDecision) -> String?
@@ -60,6 +63,7 @@ extension AgentKind {
     public func hookArguments(for plan: HookPlan) throws -> [String] { [] }
     public func hookEnvironment(for plan: HookPlan) -> [String: String] { [:] }
     public func transcript(at path: String) -> [TranscriptEntry] { [] }
+    public func toolKind(name: String, input: JSONValue) -> ToolKind { ToolClassifier.kind(name: name, input: input) }
     public func hookOutput(for payload: JSONValue, decision: RemoteDecision) -> String? { nil }
 
     /// Resume the conversation the hooks reported, as long as its transcript is still on disk.

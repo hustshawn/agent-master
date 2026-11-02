@@ -395,6 +395,11 @@ svg { display: block; flex: none; }
   overflow-wrap: anywhere; }
 .msg-user .bubble { background: var(--accent); color: var(--on-accent); }
 .msg-assistant .bubble { background: var(--raised); border: 1px solid var(--line); }
+/* Sent from here, not yet in the agent's transcript (see pendingReceipt() in app.js). */
+.msg-user.is-sending .bubble { opacity: 0.65; }
+.msg-note { font-size: 12.5px; color: var(--warning); margin: 4px 4px 0; }
+.working-row { display: flex; align-items: center; gap: 8px; padding: 2px 4px; color: var(--muted); font-size: 14px;
+  font-family: var(--mono); min-width: 0; }
 .bubble.markdown { white-space: normal; }
 .bubble.markdown > :first-child { margin-top: 0; }
 .bubble.markdown > :last-child { margin-bottom: 0; }

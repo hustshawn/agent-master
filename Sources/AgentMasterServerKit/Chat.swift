@@ -28,7 +28,9 @@ enum Chat {
     static let inputLimit = 2_000
     static let outputLimit = 4_000
 
-    static func items(_ entries: [TranscriptEntry]) -> [ChatItemJSON] {
+    /// `toolKind` titles a tool call from the name and input the agent wrote down (see `AgentKind.toolKind`).
+    static func items(_ entries: [TranscriptEntry],
+                      toolKind: (String, JSONValue) -> ToolKind = ToolClassifier.kind) -> [ChatItemJSON] {
         var items: [ChatItemJSON] = []
         var toolIndex: [String: Int] = [:]
         for entry in entries {
@@ -38,9 +40,10 @@ enum Chat {
             case .assistant(let text):
                 items.append(ChatItemJSON(kind: "assistant", text: text))
             case let .tool(name, input, id):
-                let parsed = (try? JSONValue.parse(Data(input.utf8))) ?? .null
+                // Not every input is JSON (Codex's patches are plain text).
+                let parsed = (try? JSONValue.parse(Data(input.utf8))) ?? .string(input)
                 if let id { toolIndex[id] = items.count }
-                items.append(ChatItemJSON(kind: "tool", name: name, title: ToolClassifier.kind(name: name, input: parsed).title,
+                items.append(ChatItemJSON(kind: "tool", name: name, title: toolKind(name, parsed).title,
                                           input: truncated(input, inputLimit)))
             case let .toolResult(text, id):
                 // Without an id, the result belongs to the earliest call still waiting for one.

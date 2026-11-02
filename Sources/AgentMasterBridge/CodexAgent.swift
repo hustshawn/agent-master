@@ -25,6 +25,33 @@ public struct CodexAgent: AgentKind {
 
     public init() {}
 
+    /// Its transcript's own names (codex 0.166): commands go through `exec_command`, edits through `apply_patch`,
+    /// whose input is the bare patch.
+    public func toolKind(name: String, input: JSONValue) -> ToolKind {
+        switch name {
+        case "exec_command":
+            return .shell(command: Self.command(input["cmd"]), description: nil)
+        case "apply_patch":
+            for line in (input.stringValue ?? "").split(separator: "\n") {
+                if line.hasPrefix("*** Update File: ") { return .edit(path: String(line.dropFirst(17))) }
+                if line.hasPrefix("*** Add File: ") { return .write(path: String(line.dropFirst(14))) }
+            }
+            return .other(name: name)
+        case "view_image":
+            return .read(path: input["path"]?.stringValue ?? "")
+        default:
+            return ToolClassifier.kind(name: name, input: input)
+        }
+    }
+
+    /// A command as a string, or as an argument list where `bash -lc <script>` is just the script.
+    private static func command(_ value: JSONValue?) -> String {
+        if let command = value?.stringValue { return command }
+        let parts = value?.arrayValue?.compactMap(\.stringValue) ?? []
+        if parts.count == 3, ["-c", "-lc"].contains(parts[1]) { return parts[2] }
+        return parts.joined(separator: " ")
+    }
+
     public func options(environment: [String: String]) -> [AgentOption] {
         [
             AgentOption(id: Self.modelOption, title: "Default model", kind: .choice([], allowsCustom: true)),

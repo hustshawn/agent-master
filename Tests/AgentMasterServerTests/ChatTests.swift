@@ -21,6 +21,32 @@ final class ChatTests: XCTestCase {
         ])
     }
 
+    /// Each agent keeps its own tool names in its transcript; the chat titles them the way the panels do.
+    func testStepsAreTitledFromEachAgentsOwnToolNames() {
+        func titles(_ agent: any AgentKind, _ entries: [TranscriptEntry]) -> [String?] {
+            Chat.items(entries, toolKind: agent.toolKind).map(\.title)
+        }
+        // As codex 0.166 writes them: a command's arguments are JSON, a patch is plain text.
+        XCTAssertEqual(titles(CodexAgent(), [
+            .tool(name: "exec_command", input: #"{"cmd":"cat notes.txt","workdir":"/p","max_output_tokens":4000}"#),
+            .tool(name: "exec_command", input: #"{"cmd":["bash","-lc","swift test"]}"#),
+            .tool(name: "apply_patch", input: "*** Begin Patch\n*** Update File: Sources/Login.swift\n@@\n-a\n+b\n*** End Patch"),
+            .tool(name: "apply_patch", input: "*** Begin Patch\n*** Add File: notes.txt\n+one\n*** End Patch"),
+            .tool(name: "view_image", input: #"{"path":"/p/shot.png"}"#),
+            .tool(name: "browser_navigate", input: #"{"url":"https://example.com"}"#),
+        ]), ["$ cat notes.txt", "$ swift test", "Edit Login.swift", "Write notes.txt", "Read shot.png", "browser_navigate"])
+        // Kiro's V2 names, then its V3 ones.
+        XCTAssertEqual(titles(KiroAgent(), [
+            .tool(name: "read", input: #"{"path":"/p/main.go"}"#),
+            .tool(name: "shell", input: #"{"command":"go test","__tool_use_purpose":"Run the tests"}"#),
+            .tool(name: "fs_write", input: #"{"path":"/p/notes.txt","text":"one"}"#),
+            .tool(name: "execute_bash", input: #"{"command":"echo hi"}"#),
+            .tool(name: "use_aws", input: #"{"service_name":"s3"}"#),
+        ]), ["Read main.go", "$ go test", "Write notes.txt", "$ echo hi", "use_aws"])
+        XCTAssertEqual(titles(ClaudeCodeAgent(), [.tool(name: "Read", input: #"{"file_path":"/a/Login.swift"}"#)]),
+                       ["Read Login.swift"])
+    }
+
     func testAResultWithoutAnIdGoesToTheEarliestWaitingCall() {
         let items = Chat.items([.tool(name: "a", input: ""), .tool(name: "b", input: ""), .toolResult("first")])
         XCTAssertEqual(items.map(\.output), ["first", nil])

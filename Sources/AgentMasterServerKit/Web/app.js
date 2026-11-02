@@ -98,6 +98,7 @@ const state = {
   sending: new Map(),         // sessionId -> { text, keys: Set(attachment key) } snapshot while a send is in flight
   chatTimers: new Map(),      // sessionId -> { soon, late } refetch timeouts
   chatStuck: new Map(),       // sessionId -> whether the transcript is scrolled to the bottom
+  openSteps: new Map(),       // sessionId -> keys of the steps and step groups the reader opened, kept across re-renders
   answerDrafts: new Map(),    // requestId -> Map(question -> Set(chosen labels))
   answerNotes: new Map(),     // requestId -> optional note string
   pendingMessageIds: new Map(), // sessionId -> client message id, kept across a retry
@@ -984,18 +985,27 @@ function renderChatArea(session) {
   }
 }
 
+/// Following stops only when the reader scrolls up away from the bottom. A scroll event can arrive after the
+/// conversation grew under it (the bottom was set, then a reply came in before the event), which measured alone
+/// would look like having left the bottom.
+let lastChatScrollTop = 0;
 $("chat-scroll").addEventListener("scroll", () => {
   const scroll = $("chat-scroll");
-  state.chatStuck.set(state.selectedId, scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40);
+  if (scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40) state.chatStuck.set(state.selectedId, true);
+  else if (scroll.scrollTop < lastChatScrollTop) state.chatStuck.set(state.selectedId, false);
+  lastChatScrollTop = scroll.scrollTop;
 });
 
 /// While the reader is at the bottom, the bottom stays in view however the conversation grows: its history
-/// arriving after the session opened, a new message, an image finishing loading. Scrolling up stops this.
-new ResizeObserver(() => {
+/// arriving after the session opened, a new message, an image finishing loading. So does the view itself when
+/// the composer below it changes height (its status line, a draft attachment). Scrolling up stops this.
+const followBottom = new ResizeObserver(() => {
   const scroll = $("chat-scroll");
   if (detailTab !== "conversation" || $("normal-area").hidden) return;
   if (state.chatStuck.get(state.selectedId) ?? true) scroll.scrollTop = scroll.scrollHeight;
-}).observe($("chat-messages"));
+});
+followBottom.observe($("chat-messages"));
+followBottom.observe($("chat-scroll"));
 
 $("detail-tabs").querySelectorAll("button").forEach((button) => {
   button.onclick = () => { detailTab = button.dataset.tab; renderDetailTabs(); };
@@ -1178,9 +1188,21 @@ async function fetchChat(id) {
   }
   state.chatFetching.delete(id);
   state.chatErrors.delete(id);
+  // While a turn lasts this runs every second or so: an unchanged page leaves the conversation as it is.
+  const unchanged = state.chats.has(id) && JSON.stringify(cached.slice(page.start)) === JSON.stringify(page.items);
   state.chats.set(id, [...cached.slice(0, page.start), ...page.items]);
-  if (id === state.selectedId) renderConversation(selected());
+  if (id === state.selectedId && !unchanged) renderConversation(selected());
 }
+
+/// Hooks come at a turn's start, around each tool and at its end, but the transcript also grows in between (a
+/// reply written between two tools, a prompt Kiro writes down late), so while the open session's turn lasts —
+/// or a message is still on its way — the conversation is refetched every so often, as long as the page shows.
+setInterval(() => {
+  const session = selected();
+  if (!session || document.hidden || !state.online) return;
+  const sending = [...state.messages.values()].some((m) => m.sessionId === session.id && m.status === "written");
+  if (turnIsOpen(session) || sending) fetchChat(session.id);
+}, 1200);
 
 /// Consecutive tool calls fold into one "N steps" group; everything else renders on its own.
 function groupChatItems(items) {
@@ -1229,21 +1251,67 @@ function renderConversation(session) {
   const items = state.chats.get(session.id) ?? [];
   const lastItem = items[items.length - 1];
   const agent = agentFor(session);
-  const stepNode = (item) => stepRow(item, item === lastItem, session);
-  if (!items.length) {
+  // Steps are keyed by their place in the transcript, which only grows, so one the reader opened stays open.
+  const opened = state.openSteps.get(session.id) ?? new Set();
+  state.openSteps.set(session.id, opened);
+  const position = new Map(items.map((item, index) => [item, index]));
+  const keepOpen = (key) => ({ open: opened.has(key),
+                               ontoggle: (event) => event.target.open ? opened.add(key) : opened.delete(key) });
+  const stepNode = (item) => stepRow(item, item === lastItem, session, keepOpen("step" + position.get(item)));
+  const pending = pendingReceipt(session, items);
+  if (!items.length && !pending) {
     $("chat-messages").replaceChildren(emptyConversation(session));
     return;
   }
   // Each receipt with attachments is linked to at most one transcript item, oldest first (see receiptForItem).
   const consumedReceipts = new Set();
-  $("chat-messages").replaceChildren(...groupChatItems(items).map((group) => {
+  const rows = groupChatItems(items).map((group) => {
     if (group.type === "user") return userBubble(group.item, session, consumedReceipts);
     if (group.type === "assistant") return assistantBubble(group.item, agent, session.agentName);
     if (group.type === "step") return stepNode(group.item);
-    return el("details", { class: "step-group" },
-      el("summary", {}, `${group.items.length} steps`),
+    const latest = group.items[group.items.length - 1];
+    return el("details", { class: "step-group", ...keepOpen("group" + position.get(group.items[0])) },
+      el("summary", {}, stepGlyph(latest, latest === lastItem, session),
+        el("span", { class: "step-title" }, `${group.items.length} steps · ${latest.title ?? latest.name}`)),
       el("div", { class: "step-group-body" }, group.items.map(stepNode)));
-  }));
+  });
+  if (pending) rows.push(pendingBubble(pending));
+  // A step still waiting for its result already spins; otherwise say the agent is at work (writing a reply).
+  const stepRunning = lastItem?.kind === "tool" && (lastItem.output === undefined || lastItem.output === null);
+  // The hooks report a tool the moment it starts, before the transcript has it.
+  if (turnIsOpen(session) && !stepRunning) {
+    const tool = session.state.runningTools.at(-1);
+    rows.push(el("div", { class: "working-row" }, el("span", { class: "step-glyph spin" }, "◐"),
+      el("span", { class: "step-title" }, tool ? `${session.agentName} · ${tool.title}` : `${session.agentName} is working…`)));
+  }
+  $("chat-messages").replaceChildren(...rows);
+}
+
+function turnIsOpen(session) {
+  return session.status === "running" || session.status === "needsAttention";
+}
+
+/// The message last sent from here, until its transcript has it: agents write a prompt down a moment after they
+/// get it (Kiro V2 only with its first tool or reply), and until then the chat would not show it at all.
+function pendingReceipt(session, items) {
+  let latest = null;
+  for (const receipt of state.messages.values()) {
+    if (receipt.sessionId === session.id && (!latest || receipt.createdAt > latest.createdAt)) latest = receipt;
+  }
+  if (!latest) return null;
+  const sent = withoutWhitespace(latest.text);
+  if (items.some((item) => item.kind === "user" && withoutWhitespace(item.text.replace(ATTACHMENT_IN_PROMPT_G, "")) === sent)) {
+    return null;
+  }
+  // Delivered but never written down as sent (the agent reworded it): only while its turn lasts.
+  return latest.status !== "delivered" || turnIsOpen(session) ? latest : null;
+}
+
+function pendingBubble(receipt) {
+  return el("div", { class: "msg msg-user" + (receipt.status === "written" ? " is-sending" : "") },
+    el("div", { class: "bubble" },
+      receipt.attachments.length ? sentAttachments(receipt.attachments) : null, receipt.text || null),
+    receipt.status === "unconfirmed" ? el("span", { class: "msg-note" }, "Not confirmed") : null);
 }
 
 /// An attachment's place in a prompt: Claude Code's "[Image #N]", or the path of a file uploaded from here
@@ -1299,8 +1367,8 @@ function stepGlyph(item, isLast, session) {
   return el("span", { class: "step-glyph" });
 }
 
-function stepRow(item, isLast, session) {
-  return el("details", { class: "step" },
+function stepRow(item, isLast, session, props = {}) {
+  return el("details", { class: "step", ...props },
     el("summary", {}, stepGlyph(item, isLast, session), el("span", { class: "step-title" }, item.title ?? item.name)),
     el("div", { class: "step-body" },
       el("div", { class: "step-label" }, "Input"), el("pre", {}, item.input ?? ""),
@@ -1764,6 +1832,11 @@ async function sendMessage(session) {
   const keys = new Set(list.map((a) => a.key));
   state.sending.set(session.id, { text, keys });
   state.composerErrors.delete(session.id);
+  // Sending means reading on from here: follow the bottom again, as if the reader had scrolled there, so the
+  // message and its reply stay in view until the reader scrolls up.
+  state.chatStuck.set(session.id, true);
+  const scroll = $("chat-scroll");
+  scroll.scrollTop = scroll.scrollHeight;
   renderComposer(session);
   try {
     const receipt = await api("POST", `/api/sessions/${session.id}/messages`, { id, text, attachments: ids });

@@ -57,6 +57,14 @@ public struct KiroAgent: AgentKind {
         return FileManager.default.contents(atPath: conversation).map(TranscriptParser.kiro) ?? []
     }
 
+    /// The names its hooks use too (V2's, then V3's), mapped the same way.
+    public func toolKind(name: String, input: JSONValue) -> ToolKind {
+        guard let (claudeName, claudeInput, _) = KiroHookDialect.claudeTool(name, input: input) else {
+            return ToolClassifier.kind(name: name, input: input)
+        }
+        return ToolClassifier.kind(name: claudeName, input: claudeInput)
+    }
+
     public func hooksEnabled(preferences: AgentPreferences) -> Bool {
         preferences.bool(Self.hooksOption, default: true)
     }

@@ -1,4 +1,5 @@
 import XCTest
+import AgentMasterBridge
 @testable import AgentMasterServerKit
 
 final class StartupMenuWatchTests: XCTestCase {
@@ -50,5 +51,16 @@ final class StartupMenuWatchTests: XCTestCase {
         watch.output(Data("\u{1b}[2m›\u{1b}[0m ask a question\u{1b}[1C or describe a task ↵".utf8))
         XCTAssertTrue(watch.isPromptReady)
         XCTAssertFalse(StartupMenuWatch().isPromptReady, "an agent without prompt hints is never ready this way")
+    }
+
+    /// Recorded from codex 0.166, which also reports nothing before its first prompt: the prompt row and the footer,
+    /// placed with cursor moves.
+    func testCodexsEmptyPromptMeansReady() {
+        var watch = StartupMenuWatch(promptHints: CodexAgent().promptHints)
+        watch.output(Data("\u{1b}[33;1H\u{1b}[1m›\u{1b}[22m \u{1b}[2mAsk Codex to do anything\u{1b}[34;1H\u{1b}[22m \u{1b}[35;1H \u{1b}[36;1H  ".utf8))
+        XCTAssertTrue(watch.isPromptReady)
+        var footerOnly = StartupMenuWatch(promptHints: CodexAgent().promptHints)
+        footerOnly.output(Data("\u{1b}[36;1H  \u{1b}[1m?\u{1b}[22m for shortcuts\u{1b}[39m".utf8))
+        XCTAssertTrue(footerOnly.isPromptReady, "the footer alone is enough if the placeholder ever changes")
     }
 }

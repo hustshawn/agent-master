@@ -20,6 +20,8 @@ public struct CodexAgent: AgentKind {
     public let shortcut: AgentShortcut? = AgentShortcut(key: "n", option: true)
     public var supportsResume: Bool { true }
     public var hookDialect: any HookDialect { CodexHookDialect() }
+    /// The interactive TUI reports SessionStart only with the first message (codex 0.166).
+    public var promptHints: [String] { ["Ask Codex to do anything", "? for shortcuts"] }
 
     public init() {}
 

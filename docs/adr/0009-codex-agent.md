@@ -42,5 +42,5 @@
 
 - codex 会话有状态、标题、正在运行的工具、CHANGES、恢复。页头没有 USAGE，因为 codex 没有 statusline。
 - `apply_patch` 没有 PostToolUse，补丁失败时 CHANGES 里仍会出现这次改动；Stop 会清掉一直"在运行"的这次调用。
-- 新开的 codex 会话在第一条消息之前显示 `starting`。
+- 新开的 codex 会话在第一条消息之前显示 `starting`。web 版里输入框一出现就算就绪，见 ADR 0014。
 - codex 自己的首次弹窗（版本更新、信任目录）照常出现在终端里，由用户处理。

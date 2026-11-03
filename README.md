@@ -27,7 +27,7 @@ AgentMaster runs each agent's real TUI in an embedded terminal and manages them 
 | What it is | `AgentMaster.app`, a native macOS app | `agentmaster-server`, a server that serves the same UI to a browser |
 | Where the agents run | On your Mac | On the machine the server runs on, usually a remote Linux server |
 | Use it to | Work with agents on your own machine | Run agents on a remote machine, close the browser, and pick the sessions up again from anywhere |
-| Get it | [Download](#download) or [build it](#build-and-run) | [Install on a Linux server](#install-on-a-linux-server) with one command |
+| Get it | [Download](#download) or [build it](CONTRIBUTING.md#build-and-run) | [Install on a Linux server](#install-on-a-linux-server) with one command |
 
 Both have the sidebar, the agent's real TUI, the inspector, the new-session panel and Settings, and both support every agent below. The features below describe the Mac app. The web edition's differences are in [Web edition](#web-edition).
 
@@ -39,7 +39,7 @@ Both have the sidebar, the agent's real TUI, the inspector, the new-session pane
 | [OpenAI Codex CLI](https://github.com/openai/codex) | ✓ via hooks passed with `-c`, which needs `--dangerously-bypass-hook-trust` ([why](docs/adr/0009-codex-agent.md)) | ✓ `codex resume` | — |
 | [Kiro CLI](https://kiro.dev/docs/cli/) | ✓ on the V2 engine via a per-session agent config that `KIRO_AGENT_CONFIG_DIR` points to ([trade-offs](docs/adr/0012-kiro-agent.md)), on V3 via `~/.kiro/hooks/agentmaster.json` ([why](docs/adr/0014-kiro-v3-engine.md)) | ✓ `kiro-cli chat --resume-id` | — |
 
-More agents can be added without touching the UI. See [Adding an agent](#adding-an-agent).
+More agents can be added without touching the UI. See [Adding an agent](CONTRIBUTING.md#adding-an-agent).
 
 ## Features
 
@@ -60,7 +60,6 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
 ## Requirements
 
 - macOS 14 or later
-- Xcode 15.4 (Swift 5.10) or later
 - At least one supported agent. Each is looked up in this order:
 
   | Agent | Override variable | Then |
@@ -72,25 +71,6 @@ More agents can be added without touching the UI. See [Adding an agent](#adding-
 ## Download
 
 Each tagged version is published on the [Releases](https://github.com/hustshawn/agent-master/releases) page as `AgentMaster-<tag>.dmg`, built for Apple silicon. Open the disk image and drag AgentMaster to Applications. The app is ad-hoc signed and not notarized, so run `xattr -dr com.apple.quarantine /Applications/AgentMaster.app` before the first launch. The same release also carries the [web edition](#web-edition) server for Linux x86_64 and aarch64, plus `install-server.sh`.
-
-## Build and run
-
-```bash
-./scripts/bundle.sh          # builds build/AgentMaster.app (ad-hoc signed)
-open build/AgentMaster.app
-```
-
-### Releasing
-
-Pull requests and `main` run `.github/workflows/ci.yml`. It only runs the tests, and only for the side a change can affect. The Mac app is tested on macOS, the server on Linux x86_64, and shared code on both. Docs-only changes run nothing. Builds are cached.
-
-Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests and builds everything with the tag as the version: the Mac app's disk image and static server packages for Linux x86_64 and arm64. Then it creates the GitHub release with those files and `install-server.sh` attached:
-
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-```
-
-To try the full release build before tagging, run it by hand (Actions → Release → Run workflow). It builds and packages everything and publishes nothing.
 
 ## Web edition
 
@@ -121,16 +101,9 @@ This downloads the latest release's server package for the machine's architectur
 
 It listens on `127.0.0.1` by default. From your machine, `ssh -L 8765:127.0.0.1:8765 you@server` and open the printed link. For access over a network, put it behind your own TLS-terminating proxy or load balancer, and pass `--host 0.0.0.0` if the proxy is on another machine. Anyone with the token can run commands as the server's user.
 
-### Run it yourself
+### Server options
 
-To build from source (Swift 6, on the machine it will run on), or on macOS:
-
-```bash
-scripts/package-server.sh                          # → build/agentmaster-server-<os>-<arch>/ and a .tar.gz
-build/agentmaster-server-linux-x86_64/agentmaster-server
-# AgentMaster server on http://127.0.0.1:8765
-# Open: http://127.0.0.1:8765/#token=…
-```
+`install-server.sh` sets `--host` and `--port` (see above) and leaves the rest at their defaults. To run `agentmaster-server` by hand (from an unpacked release package, or a [build of your own](CONTRIBUTING.md#build-and-run)), give any of them on its command line; it prints the link with the token.
 
 | Option | Default | |
 |---|---|---|
@@ -141,48 +114,9 @@ build/agentmaster-server-linux-x86_64/agentmaster-server
 
 `agentmaster-hook` must stay next to `agentmaster-server`, and the server must run as a user whose login shell finds the agents. In the browser, Alt+N starts another session with the selected session's agent, and Alt+0 toggles the inspector. Images pasted (⌘V) or dropped into the terminal are uploaded to the session's folder in the data directory, and their path goes to the agent, which attaches them. They are deleted with the session. The design is in [ADR 0011](docs/adr/0011-web-edition.md).
 
-## Development
+## Contributing
 
-```bash
-swift build
-swift test                   # unit and integration tests
-python3 scripts/smoke.py     # end-to-end check against the real claude (uses a few cents of Haiku tokens)
-uv run --with websockets scripts/web-smoke.py --agent claude   # the same through agentmaster-server's API (or --agent codex|kiro, --restart)
-uv run --with playwright scripts/web-ui-check.py               # the web UI in headless Chromium against the real claude
-swift scripts/make-icon.swift  # regenerate Assets/AppIcon.icns
-```
-
-The code is a single SwiftPM package with these targets:
-
-| Target | Role |
-|---|---|
-| `AgentMasterCore` | Domain models, session state reducer, theme tokens |
-| `AgentMasterWire` | NDJSON protocol over a Unix socket, hook shim logic |
-| `agentmaster-hook` | Small helper that every agent calls as its hook |
-| `AgentMasterBridge` | Agent adapters and registry, hook dialects and translation, launch environment, session restore |
-| `TerminalKit` | SwiftTerm wrapper |
-| `AgentMasterUI` | Sidebar, inspector, header, new-session panel and settings views |
-| `AgentMaster` | The app |
-| `CPTY` | Starts an agent in a pseudo-terminal (web edition) |
-| `AgentMasterServerKit` | Sessions, HTTP/WebSocket API and the browser UI (web edition) |
-| `agentmaster-server` | The web edition's server |
-
-### Adding an agent
-
-Each agent is one file in `Sources/AgentMasterBridge/`. It declares only how its CLI differs:
-
-- where its binary lives
-- its settings
-- how it loads AgentMaster's hooks
-- its other launch arguments
-- how its hook payloads read, if they differ from Claude Code's
-
-Finding the binary, the session environment, resuming, the panels, the new-session panel, Settings and the menus are shared. Add the new agent to `AgentRegistry.all` and it shows up everywhere. The checklist, with a comparison of Claude Code, Codex and Kiro CLI, is in [ADR 0010](docs/adr/0010-agent-adapter.md).
-
-## Documentation
-
-- Design: [`docs/superpowers/specs/`](docs/superpowers/specs/)
-- Decisions: [`docs/adr/`](docs/adr/)
+Building, testing, releasing and adding an agent are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Status
 

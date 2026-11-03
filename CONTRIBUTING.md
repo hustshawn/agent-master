@@ -68,9 +68,9 @@ Finding the binary, the session environment, resuming, the panels, the new-sessi
 
 ## Releasing
 
-Pull requests and `main` run `.github/workflows/ci.yml`. It only runs the tests, and only for the side a change can affect. The Mac app is tested on macOS, the server on Linux x86_64, and shared code on both. Docs-only changes run nothing. Builds are cached.
+Pull requests and `main` run `.github/workflows/ci.yml`. It runs the tests, and only for the side a change can affect. The Mac app is tested on macOS, the server on Linux x86_64, and shared code on both. Docs-only changes run nothing. Builds are cached. A change to how a side is packaged (`Package.swift`, `Package.resolved`, `scripts/bundle.sh`, `scripts/make-dmg.sh`, `scripts/package-server.sh` or `release.yml`) also runs that side's packaging scripts after its tests, so a release that would fail to build fails in CI first. Nothing is uploaded.
 
-Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It tests and builds everything with the tag as the version: the Mac app's disk image and static server packages for Linux x86_64 and arm64. Then it creates the GitHub release with those files and `install-server.sh` attached:
+Pushing a tag that starts with `v` runs `.github/workflows/release.yml`. It builds everything with the tag as the version: the Mac app's disk image and static server packages for Linux x86_64 and arm64. Then it creates the GitHub release with those files and `install-server.sh` attached. It does not repeat tests CI already passed on the tagged commit: the app skips them when CI's macOS job passed on it, the x86_64 server when CI's Linux job did. The arm64 server, which CI does not cover, always runs them, and so does a side CI skipped or has not finished. Tag a commit after its CI has passed:
 
 ```bash
 git tag v0.2.0 && git push origin v0.2.0

@@ -1,9 +1,12 @@
-# Pushing a tag like v0.2.0 tests everything and publishes a GitHub release with:
+# Pushing a tag like v0.2.0 builds everything and publishes a GitHub release with:
 #   AgentMaster-v0.2.0.dmg                                 the Mac app
 #   agentmaster-server-v0.2.0-linux-{x86_64,aarch64}.tar.gz  the web edition's server, Swift runtime linked in
 #   install-server.sh                                      installs or upgrades the server on a Linux machine
-# Pull requests only run the tests (ci.yml). To try the full release build before tagging, run this workflow
-# by hand (Actions → Release → Run workflow): it builds and packages everything and publishes nothing.
+# Pull requests and main only run the tests (ci.yml), so tests CI already passed on this commit are not run
+# again here: the app skips them when CI's macOS job passed on it, the x86_64 server when its Linux job did.
+# CI tests nothing on arm64, so that server always runs them, and so does a side CI skipped or has not finished.
+# To try the full release build before tagging, run this workflow by hand (Actions → Release → Run workflow):
+# it builds and packages everything and publishes nothing.
 name: Release
 
 on:
@@ -13,9 +16,33 @@ on:
 
 permissions:
   contents: write
+  actions: read   # CI's runs on this commit, for `tested`
 
 jobs:
+  # Which of CI's jobs passed on this commit. A skipped job does not count: CI skips the side a change cannot
+  # affect, whatever that side's last run left behind.
+  tested:
+    runs-on: ubuntu-24.04
+    outputs:
+      mac: ${{ steps.ci.outputs.mac }}
+      linux: ${{ steps.ci.outputs.linux }}
+    steps:
+      - id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mac=false linux=false
+          for run in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA" --jq '.workflow_runs[].id'); do
+            passed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs" --jq '.jobs[] | select(.conclusion == "success") | .name')
+            grep -qx mac <<< "$passed" && mac=true
+            grep -qx linux <<< "$passed" && linux=true
+          done
+          echo "mac=$mac" >> "$GITHUB_OUTPUT"
+          echo "linux=$linux" >> "$GITHUB_OUTPUT"
+          echo "CI passed on $GITHUB_SHA: macOS $mac · Linux x86_64 $linux"
+
   app:
+    needs: tested
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
@@ -28,6 +55,7 @@ jobs:
           xcodebuild -downloadComponent MetalToolchain
 
       - name: Test
+        if: needs.tested.outputs.mac != 'true'
         run: swift test
 
       - name: Bundle
@@ -47,6 +75,7 @@ jobs:
           retention-days: 1
 
   server:
+    needs: tested
     strategy:
       # Report each architecture on its own instead of cancelling the other on the first failure.
       fail-fast: false
@@ -57,7 +86,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # CI runs these on Linux x86_64 only.
       - name: Test
+        if: matrix.runner == 'ubuntu-24.04-arm' || needs.tested.outputs.linux != 'true'
         run: swift test
 
       - name: Package

@@ -12,7 +12,7 @@ needs root.
 
 This repository also holds a native **macOS** app. None of it applies on a Linux server, so skip all of it:
 
-- `AgentMaster.app`, the `.dmg` in each release, the "Download" section of the README and the Mac app part of "Build and run" in CONTRIBUTING.md
+- `AgentMaster.app`, the `.dmg` in each release, the "Mac app" part of "Install" in the README and the Mac app part of "Build and run" in CONTRIBUTING.md
 - Xcode, `xcodebuild`, the Metal toolchain
 - `scripts/bundle.sh`, `scripts/make-dmg.sh`, `scripts/smoke.py`, `scripts/make-icon.swift`
 - The `AgentMaster`, `AgentMasterUI` and `TerminalKit` targets. On Linux, `Package.swift` does not even declare them.

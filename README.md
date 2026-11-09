@@ -27,7 +27,7 @@ AgentMaster runs each agent's real TUI in an embedded terminal and manages them 
 | What it is | `AgentMaster.app`, a native macOS app | `agentmaster-server`, a server that serves the same UI to a browser |
 | Where the agents run | On your Mac | On the machine the server runs on, usually a remote Linux server |
 | Use it to | Work with agents on your own machine | Run agents on a remote machine, close the browser, and pick the sessions up again from anywhere |
-| Get it | [Download](#download) or [build it](CONTRIBUTING.md#build-and-run) | [Install on a Linux server](#install-on-a-linux-server) with one command |
+| Get it | [Download](#mac-app) the disk image | [Install on a Linux server](#web-edition-on-a-linux-server) with one command |
 
 Both have the sidebar, the agent's real TUI, the inspector, the new-session panel and Settings, and both support every agent below. The features below describe the Mac app. The web edition's differences are in [Web edition](#web-edition).
 
@@ -35,9 +35,9 @@ Both have the sidebar, the agent's real TUI, the inspector, the new-session pane
 
 | Agent | Status and panels | Restore on launch | Header usage and cost |
 |---|---|---|---|
-| [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) | ✓ via hooks passed with `--settings` | ✓ `claude --resume` | ✓ via the status line |
-| [OpenAI Codex CLI](https://github.com/openai/codex) | ✓ via hooks passed with `-c`, which needs `--dangerously-bypass-hook-trust` ([why](docs/adr/0009-codex-agent.md)) | ✓ `codex resume` | — |
-| [Kiro CLI](https://kiro.dev/docs/cli/) | ✓ on the V2 engine via a per-session agent config that `KIRO_AGENT_CONFIG_DIR` points to ([trade-offs](docs/adr/0012-kiro-agent.md)), on V3 via `~/.kiro/hooks/agentmaster.json` ([why](docs/adr/0014-kiro-v3-engine.md)) | ✓ `kiro-cli chat --resume-id` | — |
+| [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) | ✓ | ✓ `claude --resume` | ✓ via the status line |
+| [OpenAI Codex CLI](https://github.com/openai/codex) | ✓, started with `--dangerously-bypass-hook-trust` ([why](docs/adr/0009-codex-agent.md)) | ✓ `codex resume` | — |
+| [Kiro CLI](https://kiro.dev/docs/cli/) | ✓ on the V2 engine ([trade-offs](docs/adr/0012-kiro-agent.md)) and on V3 ([why](docs/adr/0014-kiro-v3-engine.md)) | ✓ `kiro-cli chat --resume-id` | — |
 
 More agents can be added without touching the UI. See [Adding an agent](CONTRIBUTING.md#adding-an-agent).
 
@@ -59,28 +59,19 @@ More agents can be added without touching the UI. See [Adding an agent](CONTRIBU
 
 ## Requirements
 
-- macOS 14 or later
-- At least one supported agent. Each is looked up in this order:
+- The Mac app: macOS 14 or later, on Apple silicon
+- The web edition's server: Linux x86_64 or aarch64
+- At least one supported agent: Claude Code, Codex CLI 0.154 or later, or Kiro CLI 2.25 or later (the V3 engine was tested with 2.37). AgentMaster finds them in the usual install locations and on your login shell's `PATH`; if one isn't found, Settings says which variable to set to its path.
 
-  | Agent | Override variable | Then |
-  |---|---|---|
-  | Claude Code | `AGENTMASTER_CLAUDE_PATH` | `~/.local/bin/claude`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
-  | Codex CLI 0.154 or later | `AGENTMASTER_CODEX_PATH` | `~/.local/bin/codex`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
-  | Kiro CLI 2.25 or later (the V3 engine was tested with 2.37) | `AGENTMASTER_KIRO_PATH` | `~/.local/bin/kiro-cli`, Homebrew, `/usr/local/bin`, your login shell's `PATH` |
+## Install
 
-## Download
+Install from the [latest release](https://github.com/hustshawn/agent-master/releases/latest). Each release has the Mac app's disk image, the [web edition](#web-edition)'s server for Linux x86_64 and aarch64, and `install-server.sh`. Building from source is for working on AgentMaster itself, or for a machine no release covers, such as an Intel Mac or the server on macOS. See [CONTRIBUTING.md](CONTRIBUTING.md#build-and-run).
 
-Each tagged version is published on the [Releases](https://github.com/hustshawn/agent-master/releases) page as `AgentMaster-<tag>.dmg`, built for Apple silicon. Open the disk image and drag AgentMaster to Applications. The app is ad-hoc signed and not notarized, so run `xattr -dr com.apple.quarantine /Applications/AgentMaster.app` before the first launch. The same release also carries the [web edition](#web-edition) server for Linux x86_64 and aarch64, plus `install-server.sh`.
+### Mac app
 
-## Web edition
+Download `AgentMaster-<tag>.dmg` from the release, open it and drag AgentMaster to Applications. The app is ad-hoc signed and not notarized, so run `xattr -dr com.apple.quarantine /Applications/AgentMaster.app` before the first launch.
 
-The web edition is for running agents on a remote server. `agentmaster-server` runs the same agents on that machine (Linux or macOS) and serves the AgentMaster UI to a browser. It has the sidebar, the real agent TUI in the page (xterm.js), the inspector, the new-session panel and Settings. Sessions live on the server, so closing the browser does not stop an agent. Reconnecting shows the terminal again.
-
-Codex and Kiro take over the mouse in their TUI, so a plain drag does not select text in their sessions. Hold Option while dragging on a Mac, or Shift elsewhere. In the Mac app, hold Shift.
-
-Settings → General → Appearance switches the page, terminal included, between Dark, Light and System (your device's mode), for that browser only. Some colours in a TUI are the agent's own: with Light, also pick a light theme in Claude Code (`/theme`).
-
-### Install on a Linux server
+### Web edition on a Linux server
 
 On the server (x86_64 or aarch64), log in as the user who runs `claude`, `codex` or `kiro-cli` and run:
 
@@ -101,9 +92,17 @@ This downloads the latest release's server package for the machine's architectur
 
 It listens on `127.0.0.1` by default. From your machine, `ssh -L 8765:127.0.0.1:8765 you@server` and open the printed link. For access over a network, put it behind your own TLS-terminating proxy or load balancer, and pass `--host 0.0.0.0` if the proxy is on another machine. Anyone with the token can run commands as the server's user.
 
+## Web edition
+
+The web edition is for running agents on a remote server. `agentmaster-server` runs the same agents on that machine (Linux or macOS) and serves the AgentMaster UI to a browser. It has the sidebar, the real agent TUI in the page (xterm.js), the inspector, the new-session panel and Settings. Sessions live on the server, so closing the browser does not stop an agent. Reconnecting shows the terminal again.
+
+Codex and Kiro take over the mouse in their TUI, so a plain drag does not select text in their sessions. Hold Option while dragging on a Mac, or Shift elsewhere. In the Mac app, hold Shift.
+
+Settings → General → Appearance switches the page, terminal included, between Dark, Light and System (your device's mode), for that browser only. Some colours in a TUI are the agent's own: with Light, also pick a light theme in Claude Code (`/theme`).
+
 ### Server options
 
-`install-server.sh` sets `--host` and `--port` (see above) and leaves the rest at their defaults. To run `agentmaster-server` by hand (from an unpacked release package, or a [build of your own](CONTRIBUTING.md#build-and-run)), give any of them on its command line; it prints the link with the token.
+`install-server.sh` sets `--host` and `--port` (see [Web edition on a Linux server](#web-edition-on-a-linux-server)) and leaves the rest at their defaults. To run `agentmaster-server` by hand from an unpacked release package, give any of them on its command line; it prints the link with the token.
 
 | Option | Default | |
 |---|---|---|

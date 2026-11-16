@@ -79,6 +79,48 @@ final class CodexAgentTests: XCTestCase {
         XCTAssertEqual(options[5].kind, .toggle(default: true))
     }
 
+    // MARK: models
+
+    private let catalog = Data("""
+        {"models": [
+          {"slug": "global.openai.gpt-6.1-sol", "display_name": "GPT-6.1 Sol (Global)", "visibility": "list"},
+          {"slug": "codex-auto-review", "display_name": "Auto review", "visibility": "hide"},
+          {"slug": "us.openai.gpt-6-luna", "visibility": "list"}
+        ]}
+        """.utf8)
+
+    func testModelChoicesAreTheModelsCodexsPickerLists() {
+        XCTAssertEqual(CodexAgent.modelChoices(fromCatalog: catalog),
+                       [AgentChoice(value: "global.openai.gpt-6.1-sol", label: "GPT-6.1 Sol (Global)", detail: "global.openai.gpt-6.1-sol"),
+                        AgentChoice(value: "us.openai.gpt-6-luna")])
+    }
+
+    func testAnUnreadableOrEmptyCatalogGivesNoChoices() {
+        XCTAssertNil(CodexAgent.modelChoices(fromCatalog: Data("not json".utf8)))
+        XCTAssertNil(CodexAgent.modelChoices(fromCatalog: Data(#"{"models": []}"#.utf8)))
+        XCTAssertNil(CodexAgent.modelChoices(fromCatalog: Data(#"{"models": [{"slug": "x", "visibility": "hide"}]}"#.utf8)))
+    }
+
+    func testModelChoicesComeFromCodexDebugModels() throws {
+        let codex = try install.executable("codex")
+        try Data("""
+            #!/bin/sh
+            [ "$1 $2" = "debug models" ] || exit 1
+            cat <<'JSON'
+            \(String(decoding: catalog, as: UTF8.self))
+            JSON
+            """.utf8).write(to: URL(fileURLWithPath: codex))
+        XCTAssertEqual(CodexAgent().modelChoices(environment: ["AGENTMASTER_CODEX_PATH": codex])?.map(\.value),
+                       ["global.openai.gpt-6.1-sol", "us.openai.gpt-6-luna"])
+    }
+
+    func testAFailingCodexGivesNoChoices() throws {
+        let codex = try install.executable("codex")
+        try Data("#!/bin/sh\necho '{\"models\": [{\"slug\": \"x\", \"visibility\": \"list\"}]}'\nexit 1\n".utf8)
+            .write(to: URL(fileURLWithPath: codex))
+        XCTAssertNil(CodexAgent().modelChoices(environment: ["AGENTMASTER_CODEX_PATH": codex]))
+    }
+
     // MARK: hooks and resume
 
     func testHooksAreInjectedForEveryEventWithTheTrustBypass() {

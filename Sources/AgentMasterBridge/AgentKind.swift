@@ -25,6 +25,9 @@ public protocol AgentKind: Sendable {
 
     /// Declared settings; the default-model option, if any, uses `AgentOption.modelId`.
     func options(environment: [String: String]) -> [AgentOption]
+    /// The models this agent's CLI lists for the user's account, for the default-model choices; nil when it
+    /// lists none. Runs the CLI, so it is called once in the background (see `AgentRegistry.modelCatalog`).
+    func modelChoices(environment: [String: String]) -> [AgentChoice]?
     /// A toggle the current preferences switch on regardless of its stored value (shown on and disabled).
     func isForcedOn(optionId: String, preferences: AgentPreferences) -> Bool
     /// The id `launch` needs to continue this session's conversation later.
@@ -59,6 +62,18 @@ extension AgentKind {
     public var hookDialect: any HookDialect { ClaudeHookDialect() }
     public var promptHints: [String] { [] }
     public func isForcedOn(optionId: String, preferences: AgentPreferences) -> Bool { false }
+    public func modelChoices(environment: [String: String]) -> [AgentChoice]? { nil }
+
+    /// The declared options with `models`, when there are any, as the default model's choices.
+    public func options(environment: [String: String], models: [AgentChoice]?) -> [AgentOption] {
+        let declared = options(environment: environment)
+        guard let models, !models.isEmpty else { return declared }
+        return declared.map { option in
+            guard option.id == AgentOption.modelId, case let .choice(_, allowsCustom) = option.kind else { return option }
+            return AgentOption(id: option.id, title: option.title, kind: .choice(models, allowsCustom: allowsCustom),
+                               note: option.note)
+        }
+    }
     public func hooksEnabled(preferences: AgentPreferences) -> Bool { false }
     public func hookArguments(for plan: HookPlan) throws -> [String] { [] }
     public func hookEnvironment(for plan: HookPlan) -> [String: String] { [:] }
@@ -102,6 +117,11 @@ public enum AgentRegistry {
 
     public static func agent(id: String) -> (any AgentKind)? {
         all.first { $0.id == id }
+    }
+
+    /// Each agent's listed models by agent id, for `options(environment:models:)`. Blocks while the CLIs run.
+    public static func modelCatalog(environment: [String: String]) -> [String: [AgentChoice]] {
+        all.reduce(into: [:]) { catalog, agent in catalog[agent.id] = agent.modelChoices(environment: environment) }
     }
 
     /// ⌘N: the selected session's agent, else the default one.

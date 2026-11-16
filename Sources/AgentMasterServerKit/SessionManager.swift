@@ -48,20 +48,25 @@ public final class SessionManager: @unchecked Sendable {
         public var executableURL: URL
         /// The agents' environment. Nil captures the login shell's, falling back to the server's own.
         public var environment: [String: String]?
+        /// The models each agent lists, by agent id. Nil asks the agents' CLIs at startup.
+        public var modelCatalog: [String: [AgentChoice]]?
         /// How push notifications reach the push services; replaced in tests.
         public var pushTransport: any WebPushTransport
 
         public init(dataDirectory: URL, executableURL: URL, environment: [String: String]? = nil,
+                    modelCatalog: [String: [AgentChoice]]? = nil,
                     pushTransport: any WebPushTransport = HTTPClientWebPushTransport()) {
             self.dataDirectory = dataDirectory
             self.executableURL = executableURL
             self.environment = environment
+            self.modelCatalog = modelCatalog
             self.pushTransport = pushTransport
         }
     }
 
     public let paths: AppPaths
     public let environment: [String: String]
+    private let modelCatalog: [String: [AgentChoice]]
     private let settings: ServerSettings
     private let journal: OpenSessionJournal
     private let journalLock = NSLock()
@@ -83,6 +88,7 @@ public final class SessionManager: @unchecked Sendable {
                          executableURL: configuration.executableURL)
         journal = OpenSessionJournal(fileURL: paths.openSessionsURL)
         environment = configuration.environment ?? LaunchEnvironment.captureLoginShell() ?? ProcessInfo.processInfo.environment
+        modelCatalog = configuration.modelCatalog ?? AgentRegistry.modelCatalog(environment: environment)
         try paths.prepare()
         settings = ServerSettings(url: configuration.dataDirectory.appendingPathComponent("settings.json"))
         push = try PushNotifier(dataDirectory: configuration.dataDirectory, transport: configuration.pushTransport)
@@ -367,7 +373,9 @@ public final class SessionManager: @unchecked Sendable {
     // MARK: settings
 
     public func agents() -> [AgentJSON] {
-        AgentRegistry.all.map { AgentJSON($0, environment: environment, preferences: settings.preferences(for: $0.id)) }
+        AgentRegistry.all.map {
+            AgentJSON($0, environment: environment, models: modelCatalog[$0.id], preferences: settings.preferences(for: $0.id))
+        }
     }
 
     public func setOption(agentId: String, optionId: String, value: String?) throws {

@@ -13,9 +13,10 @@
 | [0006](0006-sidebar-groups-and-session-titles.md) | 侧边栏项目分组与会话标题 | 已接受 |
 | [0007](0007-collapsible-inspector-and-header-usage.md) | 右侧面板按需展开、可收起，USAGE 移到页头 | 已接受 |
 | [0008](0008-app-icon.md) | App 图标：A 与 M 交织的几何字母组合 | 已接受 |
-| [0009](0009-codex-agent.md) | 接入 Codex CLI 作为第二个 agent | 已接受 |
+| [0009](0009-codex-agent.md) | 接入 Codex CLI 作为第二个 agent | 已接受；默认模型的选项由 0015 改为读 codex 的模型目录 |
 | [0010](0010-agent-adapter.md) | Agent 适配层：每个 agent 只描述自己的差异 | 已接受 |
 | [0011](0011-web-edition.md) | Web 版：agentmaster-server + 浏览器界面 | 已接受 |
 | [0012](0012-kiro-agent.md) | 接入 Kiro CLI 作为第三个 agent | 已接受 |
 | [0013](0013-cross-device-control.md) | 跨端协作：聊天视图、远程审批和手机推送 | 已接受 |
 | [0014](0014-kiro-v3-engine.md) | 支持 Kiro CLI 的 V3 引擎 | 已接受 |
+| [0015](0015-codex-model-list.md) | Codex 的默认模型从 codex 自己的模型目录里选 | 已接受 |

@@ -22,6 +22,8 @@ final class AppModel {
     @ObservationIgnored private let paths = AppPaths.standard
     /// The login shell's environment once captured; Settings resolves model aliases against it.
     private(set) var capturedEnvironment: [String: String]?
+    /// The models each agent's CLI lists, by agent id, once asked; until then the model can only be typed.
+    private(set) var modelCatalog: [String: [AgentChoice]] = [:]
 
     @ObservationIgnored private let recents = RecentProjects(defaults: .standard)
     @ObservationIgnored private let preferenceStore = AgentPreferenceStore(defaults: .standard)
@@ -58,8 +60,9 @@ final class AppModel {
             errorMessage = "Could not start the hook server: \(error)"
         }
         Task {
-            _ = await environment()
+            let environment = await environment()
             await restoreOpenSessions(pending)
+            modelCatalog = await Task.detached { AgentRegistry.modelCatalog(environment: environment) }.value
         }
     }
 
@@ -103,7 +106,8 @@ final class AppModel {
     func newSessionAgents() -> [NewSessionAgent] {
         let environment = capturedEnvironment ?? ProcessInfo.processInfo.environment
         return AgentRegistry.all.map { agent in
-            let modelOption = agent.options(environment: capturedEnvironment ?? [:]).first { $0.id == AgentOption.modelId }
+            let modelOption = agent.options(environment: capturedEnvironment ?? [:], models: modelCatalog[agent.id])
+                .first { $0.id == AgentOption.modelId }
             var choices: [AgentChoice] = []
             var allowsCustom = false
             if case let .choice(values, custom)? = modelOption?.kind {

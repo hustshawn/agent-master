@@ -36,13 +36,15 @@ final class SessionManagerTests: XCTestCase {
         return url.path
     }
 
-    private func makeManager(_ environment: [String: String] = [:]) throws -> SessionManager {
+    private func makeManager(_ environment: [String: String] = [:],
+                             modelCatalog: [String: [AgentChoice]] = [:]) throws -> SessionManager {
         let manager = try SessionManager(.init(
             dataDirectory: root.appendingPathComponent("data"),
             executableURL: root.appendingPathComponent("server/agentmaster-server"),
             environment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory(),
                           "AGENTMASTER_CLAUDE_PATH": root.appendingPathComponent("bin/claude").path]
                 .merging(environment) { $1 },
+            modelCatalog: modelCatalog,
             pushTransport: pushes))
         managers.append(manager)
         return manager
@@ -314,6 +316,15 @@ final class SessionManagerTests: XCTestCase {
         try manager.close(id: closed.id)
         Thread.sleep(forTimeInterval: 0.3)
         XCTAssertEqual(pushes.urgencies.count, 3, "closing a session is not news")
+    }
+
+    func testAgentsListTheModelsTheAgentsReported() throws {
+        let manager = try makeManager(modelCatalog: ["codex": [AgentChoice(value: "m1", label: "Model 1")]])
+        let codexModel = manager.agents().first { $0.id == "codex" }?.options.first { $0.id == AgentOption.modelId }
+        XCTAssertEqual(codexModel?.choices.map(\.value), ["m1"])
+        XCTAssertEqual(codexModel?.allowsCustom, true, "a model it did not list can still be typed")
+        let claudeModel = manager.agents().first { $0.id == "claude" }?.options.first { $0.id == AgentOption.modelId }
+        XCTAssertEqual(claudeModel?.choices.map(\.value), ClaudeCodeAgent.modelAliases)
     }
 
     func testAReviewedMarkLastsUntilTheNextPromptAndAcrossARestart() throws {

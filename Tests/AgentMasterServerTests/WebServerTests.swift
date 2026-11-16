@@ -25,7 +25,8 @@ final class WebServerTests: XCTestCase {
         manager = try SessionManager(.init(
             dataDirectory: root.appendingPathComponent("data"),
             executableURL: root.appendingPathComponent("server/agentmaster-server"),
-            environment: ["PATH": "/usr/bin:/bin", "AGENTMASTER_CLAUDE_PATH": root.appendingPathComponent("bin/claude").path]))
+            environment: ["PATH": "/usr/bin:/bin", "AGENTMASTER_CLAUDE_PATH": root.appendingPathComponent("bin/claude").path],
+            modelCatalog: [:]))
     }
 
     override func tearDown() {

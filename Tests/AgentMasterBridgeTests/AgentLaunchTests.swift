@@ -82,6 +82,17 @@ final class AgentLaunchTests: XCTestCase {
         XCTAssertNil(agent.resumeId(from: state))
         XCTAssertNil(agent.shortcut)
         XCTAssertTrue(agent.hookDialect is ClaudeHookDialect)
+        XCTAssertNil(agent.modelChoices(environment: [:]), "an agent lists no models unless it says how")
+    }
+
+    func testReportedModelsReplaceOnlyTheDefaultModelChoices() {
+        let agent = CodexAgent()
+        let models = [AgentChoice(value: "m1", label: "Model 1")]
+        let declared = agent.options(environment: [:])
+        let options = agent.options(environment: [:], models: models)
+        XCTAssertEqual(options.first { $0.id == AgentOption.modelId }?.kind, .choice(models, allowsCustom: true))
+        XCTAssertEqual(options.filter { $0.id != AgentOption.modelId }, declared.filter { $0.id != AgentOption.modelId })
+        XCTAssertEqual(agent.options(environment: [:], models: nil), declared)
     }
 
     func testThePlanCoversEveryHookEventWithMatchersAndTimeouts() {

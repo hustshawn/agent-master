@@ -78,6 +78,51 @@ public struct CodexAgent: AgentKind {
         ]
     }
 
+    /// The models Codex's own picker offers for the configured provider, from `codex debug models`.
+    public func modelChoices(environment: [String: String]) -> [AgentChoice]? {
+        guard let binary = executable.locate(environment: environment),
+              let output = Self.output(of: binary, arguments: ["debug", "models"], environment: environment, timeout: 10)
+        else { return nil }
+        return Self.modelChoices(fromCatalog: output)
+    }
+
+    /// The catalog's `visibility: list` models (codex 0.166): the display name, with the id as the detail.
+    static func modelChoices(fromCatalog data: Data) -> [AgentChoice]? {
+        let models = (try? JSONValue.parse(data))?["models"]?.arrayValue ?? []
+        let choices = models.compactMap { model -> AgentChoice? in
+            guard model["visibility"]?.stringValue == "list", let slug = model["slug"]?.stringValue else { return nil }
+            guard let name = model["display_name"]?.stringValue else { return AgentChoice(value: slug) }
+            return AgentChoice(value: slug, label: name, detail: slug)
+        }
+        return choices.isEmpty ? nil : choices
+    }
+
+    /// What `binary` printed, if it exited 0 within `timeout`.
+    private static func output(of binary: String, arguments: [String], environment: [String: String],
+                               timeout: TimeInterval) -> Data? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = arguments
+        process.environment = environment
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let output = DataBox()
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            output.data = pipe.fileHandleForReading.readDataToEndOfFile()
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + timeout) == .success else {
+            process.terminate()
+            return nil
+        }
+        process.waitUntilExit()
+        return process.terminationStatus == 0 ? output.data : nil
+    }
+
     static let labels = [
         "read-only": "Read only", "workspace-write": "Workspace write", "danger-full-access": "Full access (no sandbox)",
         "on-request": "On request", "never": "Never ask",

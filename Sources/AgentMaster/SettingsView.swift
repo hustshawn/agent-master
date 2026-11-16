@@ -20,7 +20,7 @@ struct SettingsView: View {
                     id: agent.id, name: agent.displayName, glyph: agent.glyph,
                     location: agent.executable.locate(environment: environment).map(Self.abbreviatingHome),
                     missingHint: "Not found. Install \(agent.executable.name) or set \(agent.executable.overrideVariable).",
-                    options: agent.options(environment: model.capturedEnvironment ?? [:]))
+                    options: agent.options(environment: model.capturedEnvironment ?? [:], models: model.modelCatalog[agent.id]))
             },
             preferences: { preferences[$0] ?? store.preferences(for: $0) },
             isForcedOn: { agentId, optionId in

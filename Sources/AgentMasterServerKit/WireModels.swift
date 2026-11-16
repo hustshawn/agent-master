@@ -169,7 +169,7 @@ public struct AgentJSON: Codable, Sendable {
     /// Whether its sessions report usage at all, so the browser can tell "not yet" from "never".
     public let reportsUsage: Bool
 
-    init(_ agent: any AgentKind, environment: [String: String], preferences: AgentPreferences) {
+    init(_ agent: any AgentKind, environment: [String: String], models: [AgentChoice]?, preferences: AgentPreferences) {
         id = agent.id
         reportsUsage = agent.reportsUsage
         name = agent.displayName
@@ -181,7 +181,7 @@ public struct AgentJSON: Codable, Sendable {
         }
         location = agent.executable.locate(environment: environment)
         missingHint = "Not found. Install \(agent.executable.name) or set \(agent.executable.overrideVariable)."
-        let declared = agent.options(environment: environment)
+        let declared = agent.options(environment: environment, models: models)
         options = declared.map { option in
             switch option.kind {
             case let .choice(choices, allowsCustom):

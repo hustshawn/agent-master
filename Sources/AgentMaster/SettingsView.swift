@@ -8,6 +8,7 @@ struct SettingsView: View {
     let model: AppModel
     @State private var preferences: [String: AgentPreferences] = [:]
     @AppStorage(GeneralSettings.restoreSessionsOnLaunchKey) private var restoreSessions = true
+    @AppStorage(GeneralSettings.aiSessionTitlesKey) private var aiSessionTitles = true
     @AppStorage(HotkeyMap.storageKey) private var hotkeys = HotkeyMap()
     @State private var switchProblem: String?
     private let store = AgentPreferenceStore(defaults: .standard)
@@ -36,6 +37,13 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Restore sessions on launch")
                         Text("Sessions open when AgentMaster quits come back, resuming their conversations.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Toggle(isOn: $aiSessionTitles) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("AI session titles")
+                        Text("After a session's first turn, Claude Haiku names it from the prompt and the reply. Needs Claude Code.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

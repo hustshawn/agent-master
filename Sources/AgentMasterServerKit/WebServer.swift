@@ -10,7 +10,7 @@ import AgentMasterBridge
 ///
 ///     GET    /api/agents                               agents, their settings, and General settings
 ///     PUT    /api/agents/{agent}/options/{option}      {"value": "..."|null}
-///     PUT    /api/general                              {"restoreSessionsOnLaunch": bool}
+///     PUT    /api/general                              {"restoreSessionsOnLaunch"?: bool, "aiSessionTitles"?: bool}
 ///     GET    /api/sessions                             every session
 ///     POST   /api/sessions                             {"projectPath", "agentId"?, "model"?, "columns"?, "rows"?}
 ///     PATCH  /api/sessions/{id}                        {"name": "..."}
@@ -57,7 +57,7 @@ public enum WebServer {
 
         api.get("agents") { _, _ in
             AgentsResponse(agents: manager.agents(), restoreSessionsOnLaunch: manager.restoreSessionsOnLaunch,
-                           home: NSHomeDirectory())
+                           aiSessionTitles: manager.aiSessionTitles, home: NSHomeDirectory())
         }
         api.put("agents/:agent/options/:option") { request, context -> HTTPResponse.Status in
             let body = try await request.decode(as: OptionRequest.self, context: context)
@@ -69,7 +69,8 @@ public enum WebServer {
         }
         api.put("general") { request, context -> HTTPResponse.Status in
             let body = try await request.decode(as: GeneralRequest.self, context: context)
-            manager.restoreSessionsOnLaunch = body.restoreSessionsOnLaunch
+            if let restore = body.restoreSessionsOnLaunch { manager.restoreSessionsOnLaunch = restore }
+            if let titles = body.aiSessionTitles { manager.aiSessionTitles = titles }
             return .noContent
         }
 
@@ -356,6 +357,7 @@ struct RevalidateMiddleware<Context: RequestContext>: RouterMiddleware {
 struct AgentsResponse: ResponseEncodable {
     let agents: [AgentJSON]
     let restoreSessionsOnLaunch: Bool
+    let aiSessionTitles: Bool
     let home: String
 }
 
@@ -376,7 +378,8 @@ struct OptionRequest: Decodable {
 }
 
 struct GeneralRequest: Decodable {
-    let restoreSessionsOnLaunch: Bool
+    let restoreSessionsOnLaunch: Bool?
+    let aiSessionTitles: Bool?
 }
 
 struct CreateSessionRequest: Decodable {

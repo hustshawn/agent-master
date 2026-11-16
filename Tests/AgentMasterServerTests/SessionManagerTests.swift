@@ -327,6 +327,58 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertEqual(claudeModel?.choices.map(\.value), ClaudeCodeAgent.modelAliases)
     }
 
+    /// The stand-in claude, which also answers `claude -p` with a title and counts those calls.
+    private func titlingClaude() throws -> URL {
+        let calls = root.appendingPathComponent("title-calls")
+        try script("bin/claude", """
+        #!/bin/sh
+        if [ "$1" = "-p" ]; then cat > /dev/null; echo call >> '\(calls.path)'; echo '"Fix flaky tests."'; exit 0; fi
+        echo "agent-ready $AGENTMASTER_SESSION_ID $*"
+        exec cat
+        """)
+        return calls
+    }
+
+    private func titleCalls(_ calls: URL) -> Int {
+        ((try? String(contentsOf: calls, encoding: .utf8)) ?? "").split(separator: "\n").count
+    }
+
+    private func firstTurn(_ manager: SessionManager, _ id: String) throws {
+        try hook(manager, id, ["hook_event_name": "UserPromptSubmit", "session_id": "c1",
+                               "prompt": "the server tests fail now and then\nplease fix them"])
+        XCTAssertTrue(wait { manager.list().first { $0.id == id }?.state.firstPrompt != nil })
+        try hook(manager, id, ["hook_event_name": "Stop", "session_id": "c1", "last_assistant_message": "Fixed the race."])
+    }
+
+    func testTheFirstTurnNamesTheSessionOnce() throws {
+        let calls = try titlingClaude()
+        let manager = try makeManager()
+        let session = try manager.create(projectPath: project)
+        try firstTurn(manager, session.id)
+        XCTAssertTrue(wait { manager.list().first?.title == "Fix flaky tests" }, "\(String(describing: manager.list().first?.title))")
+        XCTAssertEqual(manager.list().first?.customName, "Fix flaky tests", "kept like a name, so it survives a restart")
+        try hook(manager, session.id, ["hook_event_name": "UserPromptSubmit", "session_id": "c1", "prompt": "and the docs"])
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1", "last_assistant_message": "Done."])
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(titleCalls(calls), 1)
+    }
+
+    func testNoAITitleWhenTurnedOffOrAlreadyNamed() throws {
+        let calls = try titlingClaude()
+        let manager = try makeManager()
+        manager.aiSessionTitles = false
+        let off = try manager.create(projectPath: project)
+        try firstTurn(manager, off.id)
+        manager.aiSessionTitles = true
+        let named = try manager.create(projectPath: project)
+        try manager.rename(id: named.id, to: "Mine")
+        try firstTurn(manager, named.id)
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(titleCalls(calls), 0)
+        XCTAssertEqual(manager.list().first { $0.id == off.id }?.title, "the server tests fail now and then")
+        XCTAssertEqual(manager.list().first { $0.id == named.id }?.title, "Mine")
+    }
+
     func testAReviewedMarkLastsUntilTheNextPromptAndAcrossARestart() throws {
         let first = try makeManager()
         let session = try first.create(projectPath: project)

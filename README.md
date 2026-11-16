@@ -43,7 +43,7 @@ More agents can be added without touching the UI. See [Adding an agent](CONTRIBU
 
 ## Features
 
-- **Every agent in one sidebar.** Sessions are grouped by project, whichever agent runs them. Each session is titled by its first prompt, and you can rename it. Sessions from agents other than Claude Code are labelled with the agent's name, for example `Codex · idle`.
+- **Every agent in one sidebar.** Sessions are grouped by project, whichever agent runs them. Each session is titled by its first prompt until its first turn ends, when Claude Haiku names it from the prompt and the reply (turn this off in Settings → General). You can rename it. Sessions from agents other than Claude Code are labelled with the agent's name, for example `Codex · idle`.
 - **New session panel.** Every ＋ opens a panel where you choose the agent, the project and, if you want, a model other than its default. ⌘N starts another session with the selected session's agent in its project, ⌥⌘N starts Codex, and ⌃⌘N starts Kiro.
 
   <img src="docs/images/new-session.png" width="420" alt="The new-session panel with Claude Code, Codex and Kiro to pick from, a model picker and a project picker">

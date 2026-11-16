@@ -7,6 +7,13 @@ public enum GeneralSettings {
     public static func restoreSessionsOnLaunch(_ defaults: UserDefaults) -> Bool {
         defaults.object(forKey: restoreSessionsOnLaunchKey) as? Bool ?? true
     }
+
+    /// Whether a session's first turn gets it an AI title (see SessionTitler) instead of its first prompt.
+    public static let aiSessionTitlesKey = "aiSessionTitles"
+
+    public static func aiSessionTitles(_ defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: aiSessionTitlesKey) as? Bool ?? true
+    }
 }
 
 /// What the app knows about one open session when it writes the journal.

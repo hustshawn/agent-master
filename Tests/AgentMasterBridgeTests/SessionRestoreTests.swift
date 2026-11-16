@@ -141,6 +141,15 @@ final class SessionRestoreTests: XCTestCase {
         XCTAssertFalse(GeneralSettings.restoreSessionsOnLaunch(defaults))
     }
 
+    func testAITitlesDefaultOn() {
+        let suite = "am-general-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertTrue(GeneralSettings.aiSessionTitles(defaults))
+        defaults.set(false, forKey: GeneralSettings.aiSessionTitlesKey)
+        XCTAssertFalse(GeneralSettings.aiSessionTitles(defaults))
+    }
+
     // MARK: titles
 
     func testRecordsCarryTheTitle() {

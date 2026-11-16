@@ -157,10 +157,19 @@ final class SessionStateTests: XCTestCase {
         state.apply(.promptSubmitted(text: "   "))
         state.apply(.promptSubmitted(text: "/model"))
         XCTAssertNil(state.firstPrompt)
+        XCTAssertNil(state.firstPromptText)
         state.apply(.promptSubmitted(text: "\n  fix the bug\nin add()"))
         XCTAssertEqual(state.firstPrompt, "fix the bug")
+        XCTAssertEqual(state.firstPromptText, "fix the bug\nin add()", "the whole prompt, for the AI title")
         state.apply(.promptSubmitted(text: "second prompt"))
         XCTAssertEqual(state.firstPrompt, "fix the bug")
+        XCTAssertEqual(state.firstPromptText, "fix the bug\nin add()")
+    }
+
+    func testTheWholeFirstPromptIsCutToItsLimit() {
+        var state = SessionState()
+        state.apply(.promptSubmitted(text: String(repeating: "a", count: SessionState.promptTextLimit + 10)))
+        XCTAssertEqual(state.firstPromptText?.count, SessionState.promptTextLimit)
     }
 
     func testFirstPromptResetsOnANewConversationOnly() {
@@ -171,5 +180,6 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(state.firstPrompt, "hello")
         state.apply(.sessionStarted(agentSessionId: "b", cwd: "/p", transcriptPath: nil))
         XCTAssertNil(state.firstPrompt)
+        XCTAssertNil(state.firstPromptText)
     }
 }

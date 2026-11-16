@@ -20,6 +20,8 @@ public final class ServerSession: @unchecked Sendable {
     private var _reviewed: Bool
     /// When the agent last did something (not counting status-line usage updates).
     private var lastActivityAt = Date()
+    /// The session has had its one try at an AI title.
+    private var titleClaimed = false
     /// Until the first prompt, whether the terminal shows a menu Chat cannot answer; nil from then on.
     private var startupMenu: StartupMenuWatch?
     /// Called after any change a browser should see.
@@ -92,6 +94,24 @@ public final class ServerSession: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return _state
+    }
+
+    /// Claims the one AI title a session gets: its first prompt and the last reply, or nil once named or claimed.
+    func claimTitle() -> (prompt: String, reply: String?)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !titleClaimed, let prompt = SessionTitler.prompt(for: _state, customName: _customName) else { return nil }
+        titleClaimed = true
+        return (prompt, _state.lastMessage)
+    }
+
+    /// The AI title, unless the user named the session while it was being written.
+    func setAITitle(_ title: String) {
+        lock.lock()
+        guard _customName == nil else { return lock.unlock() }
+        _customName = title
+        lock.unlock()
+        onChange?()
     }
 
     public var customName: String? {

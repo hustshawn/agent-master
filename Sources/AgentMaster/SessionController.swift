@@ -17,8 +17,10 @@ final class SessionController: Identifiable {
     @ObservationIgnored var onStateChange: (() -> Void)?
     let createdAt = Date()
     private(set) var state = SessionState()
-    /// Set by the user (Rename…) or carried over from the journal when restored.
+    /// Set by the user (Rename…), by the AI title after the first turn, or carried over from the journal when restored.
     var customName: String?
+    /// The session has had its one try at an AI title.
+    @ObservationIgnored var titleClaimed = false
     /// Filled in on request (Summarize Session); not kept across launches.
     var summary = SummaryState.none
     @ObservationIgnored let terminal: TerminalSession

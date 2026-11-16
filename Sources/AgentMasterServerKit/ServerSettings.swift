@@ -10,6 +10,8 @@ public final class ServerSettings: @unchecked Sendable {
         var options: [String: String] = [:]
         var recentProjects: [String] = []
         var restoreSessionsOnLaunch = true
+        /// Optional so a file written before it existed still decodes; nil means on.
+        var aiSessionTitles: Bool?
     }
 
     private let url: URL
@@ -59,6 +61,11 @@ public final class ServerSettings: @unchecked Sendable {
     public var restoreSessionsOnLaunch: Bool {
         get { read(\.restoreSessionsOnLaunch) }
         set { write { $0.restoreSessionsOnLaunch = newValue } }
+    }
+
+    public var aiSessionTitles: Bool {
+        get { read { $0.aiSessionTitles ?? true } }
+        set { write { $0.aiSessionTitles = newValue } }
     }
 
     private func read<T>(_ body: (Stored) -> T) -> T {

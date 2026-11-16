@@ -287,7 +287,27 @@ final class AppModel {
         guard let session = sessions.first(where: { $0.id == message.sessionId }) else { return }
         switch message.kind {
         case .statusline: session.receive(statusLine: message.payload)
-        case .event, .request: session.receive(hook: message.payload)
+        case .event, .request:
+            session.receive(hook: message.payload)
+            let payload = AgentRegistry.agent(id: session.agentId)?.hookDialect.normalize(message.payload)
+            if payload?["hook_event_name"]?.stringValue == "Stop" { titleIfNeeded(session) }
+        }
+    }
+
+    /// After a turn ends: once per session, a short AI title from its first prompt and the reply, unless it has a name.
+    private func titleIfNeeded(_ session: SessionController) {
+        guard GeneralSettings.aiSessionTitles(.standard), !session.titleClaimed,
+              let prompt = SessionTitler.prompt(for: session.state, customName: session.customName) else { return }
+        session.titleClaimed = true
+        let reply = session.state.lastMessage
+        let directory = paths.supportDirectory
+        Task {
+            let environment = await environment()
+            guard let title = try? await SessionTitler.run(prompt: prompt, reply: reply, environment: environment,
+                                                           directory: directory),
+                  session.customName == nil else { return }
+            session.customName = title
+            persistOpenSessions()
         }
     }
 }

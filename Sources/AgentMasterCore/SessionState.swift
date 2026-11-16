@@ -24,10 +24,14 @@ public struct SessionState: Equatable, Sendable {
     public var lastMessage: String?
     /// The first real prompt of this conversation (slash commands skipped); names the session by default.
     public var firstPrompt: String?
+    /// That prompt whole (cut to `promptTextLimit`), for the AI title written after the first turn.
+    public var firstPromptText: String?
     public var endReason: String?
     /// When a prompt was last sent, the agent last asked for the user, or a turn last finished. Tool calls and
     /// the status line don't count, so two running sessions don't keep swapping places in the sidebar.
     public var lastActivityAt: Date?
+
+    public static let promptTextLimit = 2_000
 
     public init() {}
 
@@ -52,6 +56,7 @@ public struct SessionState: Equatable, Sendable {
                 lastTool = nil
                 lastMessage = nil
                 firstPrompt = nil
+                firstPromptText = nil
             }
             self.agentSessionId = agentSessionId
             self.cwd = cwd
@@ -61,7 +66,10 @@ public struct SessionState: Equatable, Sendable {
             endReason = nil
 
         case .promptSubmitted(let text):
-            if firstPrompt == nil, let line = Self.titleLine(text) { firstPrompt = line }
+            if firstPrompt == nil, let line = Self.titleLine(text) {
+                firstPrompt = line
+                firstPromptText = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.promptTextLimit))
+            }
             setStatus(.running)
             attentionMessage = nil
             lastActivityAt = now

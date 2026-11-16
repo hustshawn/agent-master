@@ -388,6 +388,22 @@ public final class SessionManager: @unchecked Sendable {
         set { settings.restoreSessionsOnLaunch = newValue }
     }
 
+    public var aiSessionTitles: Bool {
+        get { settings.aiSessionTitles }
+        set { settings.aiSessionTitles = newValue }
+    }
+
+    /// After a turn ends: once per session, a short AI title from its first prompt and the reply, unless it has a name.
+    private func titleIfNeeded(_ session: ServerSession) {
+        guard settings.aiSessionTitles, let turn = session.claimTitle() else { return }
+        let environment = environment, directory = paths.supportDirectory
+        Task {
+            guard let title = try? await SessionTitler.run(prompt: turn.prompt, reply: turn.reply, environment: environment,
+                                                           directory: directory) else { return }
+            session.setAITitle(title)
+        }
+    }
+
     public var recentProjects: [String] { settings.recentProjects }
 
     // MARK: private
@@ -406,6 +422,7 @@ public final class SessionManager: @unchecked Sendable {
             messages.promptSubmitted(sessionId: session.id, prompt: payload["prompt"]?.stringValue ?? "")
         case "Stop":
             requests.expire(sessionId: session.id, reason: "turn ended")
+            titleIfNeeded(session)
             // Tagged per session, so a device shows only the latest turn's end.
             let json = session.json
             push.notify(PushPayload(title: "Turn finished · \(json.title)",

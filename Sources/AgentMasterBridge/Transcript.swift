@@ -207,14 +207,23 @@ public enum SessionSummary {
         }
     }
 
-    /// Runs `claude -p` with no tools and no saved session, in `directory` so no project's CLAUDE.md is read.
+    /// Runs `claude -p` with no tools, no MCP servers and no saved session, in `directory` so no project's CLAUDE.md is read.
     public static func run(entries: [TranscriptEntry], environment: [String: String], directory: URL,
                            timeout: TimeInterval = 300) async throws -> String {
         guard !entries.isEmpty else { throw Failure.emptyTranscript }
+        return try await claude(input: conversation(entries), instructions: instructions, model: nil,
+                                environment: environment, directory: directory, timeout: timeout)
+    }
+
+    /// `claude -p` on `input` with `instructions` as the system prompt, on `model` or Claude's default. No MCP servers:
+    /// `--tools ""` leaves their tools on, and starting them takes most of the run.
+    static func claude(input text: String, instructions: String, model: String?, environment: [String: String],
+                       directory: URL, timeout: TimeInterval) async throws -> String {
         guard let claude = ClaudeCodeAgent().executable.locate(environment: environment) else { throw Failure.claudeNotFound }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: claude)
-        process.arguments = ["-p", "--no-session-persistence", "--tools", "", "--system-prompt", instructions]
+        process.arguments = ["-p"] + (model.map { ["--model", $0] } ?? [])
+            + ["--no-session-persistence", "--tools", "", "--strict-mcp-config", "--system-prompt", instructions]
         process.environment = LaunchEnvironment.childEnvironment(base: environment)
         process.currentDirectoryURL = directory
         let input = Pipe(), output = Pipe(), errors = Pipe()
@@ -229,7 +238,7 @@ public enum SessionSummary {
                 }
                 // Feed stdin and drain stdout/stderr at the same time, or a full pipe stalls claude.
                 DispatchQueue.global().async {
-                    input.fileHandleForWriting.write(Data(conversation(entries).utf8))
+                    input.fileHandleForWriting.write(Data(text.utf8))
                     try? input.fileHandleForWriting.close()
                 }
                 let stderr = DataBox()

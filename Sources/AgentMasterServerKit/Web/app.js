@@ -74,6 +74,7 @@ const state = {
   selectedId: null,
   agents: [],                 // AgentJSON[]
   restoreSessionsOnLaunch: true,
+  aiSessionTitles: true,
   home: "/",
   terminals: new Map(),       // id -> { term, fit, socket, node, alive }
   events: null,
@@ -191,6 +192,7 @@ async function loadAgents() {
   const response = await api("GET", "/api/agents");
   state.agents = response.agents;
   state.restoreSessionsOnLaunch = response.restoreSessionsOnLaunch;
+  state.aiSessionTitles = response.aiSessionTitles;
   state.home = response.home;
 }
 
@@ -2468,6 +2470,18 @@ function generalPage() {
               try {
                 await api("PUT", "/api/general", { restoreSessionsOnLaunch: e.target.checked });
                 state.restoreSessionsOnLaunch = e.target.checked;
+                markSaved();
+              } catch (error) { alert(error.message); }
+            } }), el("span"))),
+      el("div", { class: "setting-row toggle-row" },
+        el("div", { class: "setting-description" }, el("label", {}, "AI session titles"),
+          el("p", {}, "After a session's first turn, Claude Haiku names it from the prompt and the reply. Needs Claude Code on the server.")),
+        el("label", { class: "settings-switch" },
+          el("input", { type: "checkbox", checked: state.aiSessionTitles, disabled, "aria-label": "AI session titles",
+            onchange: async (e) => {
+              try {
+                await api("PUT", "/api/general", { aiSessionTitles: e.target.checked });
+                state.aiSessionTitles = e.target.checked;
                 markSaved();
               } catch (error) { alert(error.message); }
             } }), el("span")))),

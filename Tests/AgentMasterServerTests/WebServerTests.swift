@@ -196,6 +196,17 @@ final class WebServerTests: XCTestCase {
                 XCTAssertEqual($0.status, .noContent)
             }
             XCTAssertFalse(self.manager.restoreSessionsOnLaunch)
+            XCTAssertTrue(self.manager.aiSessionTitles, "a request sets only what it names")
+            try await client.execute(uri: "/api/general", method: .put, headers: self.auth,
+                                     body: ByteBuffer(string: #"{"aiSessionTitles":false}"#)) {
+                XCTAssertEqual($0.status, .noContent)
+            }
+            XCTAssertFalse(self.manager.aiSessionTitles)
+            XCTAssertFalse(self.manager.restoreSessionsOnLaunch)
+            try await client.execute(uri: "/api/agents", method: .get, headers: self.auth) {
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(buffer: $0.body)) as? [String: Any])
+                XCTAssertEqual(json["aiSessionTitles"] as? Bool, false)
+            }
         }
     }
 

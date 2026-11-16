@@ -56,25 +56,39 @@ final class ClaudeCodeAgentTests: XCTestCase {
         }
     }
 
+    func testEveryKnownEffortIsPassed() {
+        for effort in ["low", "medium", "high", "xhigh", "max"] {
+            XCTAssertEqual(args(noBypass.merging(["effort": effort]) { $1 }), ["--settings", "/s.json", "--effort", effort], effort)
+        }
+    }
+
+    func testUnknownEffortIsIgnored() {
+        XCTAssertEqual(args(noBypass.merging(["effort": "ultra"]) { $1 }), ["--settings", "/s.json"])
+    }
+
     func testArgumentOrderIsFixed() {
-        XCTAssertEqual(args(["model": "sonnet", "permissionMode": "plan", "allowBypass": "true"], resumeId: "abc-123"),
-                       ["--settings", "/s.json", "--model", "sonnet", "--permission-mode", "plan",
+        XCTAssertEqual(args(["model": "sonnet", "effort": "high", "permissionMode": "plan", "allowBypass": "true"],
+                            resumeId: "abc-123"),
+                       ["--settings", "/s.json", "--model", "sonnet", "--effort", "high", "--permission-mode", "plan",
                         "--allow-dangerously-skip-permissions", "--resume", "abc-123"])
     }
 
     // MARK: options
 
-    func testOptionsDeclareModelModeAndBypassInOrder() {
+    func testOptionsDeclareModelEffortModeAndBypassInOrder() {
         let options = ClaudeCodeAgent().options(environment: [:])
-        XCTAssertEqual(options.map(\.id), ["model", "permissionMode", "allowBypass"])
+        XCTAssertEqual(options.map(\.id), ["model", "effort", "permissionMode", "allowBypass"])
         guard case let .choice(models, allowsCustom) = options[0].kind else { return XCTFail("model is a choice") }
         XCTAssertEqual(models.map(\.value), ["opus", "sonnet", "haiku", "fable"])
         XCTAssertTrue(allowsCustom)
-        guard case let .choice(modes, modesCustom) = options[1].kind else { return XCTFail("mode is a choice") }
+        guard case let .choice(efforts, effortsCustom) = options[1].kind else { return XCTFail("effort is a choice") }
+        XCTAssertEqual(efforts.map(\.value), ["low", "medium", "high", "xhigh", "max"])
+        XCTAssertFalse(effortsCustom)
+        guard case let .choice(modes, modesCustom) = options[2].kind else { return XCTFail("mode is a choice") }
         XCTAssertEqual(modes.map(\.value), ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"])
         XCTAssertEqual(modes.map(\.label), ["Manual (default)", "Accept edits", "Plan", "Auto", "Don't ask", "Bypass permissions"])
         XCTAssertFalse(modesCustom)
-        XCTAssertEqual(options[2].kind, .toggle(default: true))
+        XCTAssertEqual(options[3].kind, .toggle(default: true))
     }
 
     func testModelDetailComesFromTheAliasEnvironmentVariable() {

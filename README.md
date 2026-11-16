@@ -54,7 +54,7 @@ More agents can be added without touching the UI. See [Adding an agent](CONTRIBU
 - **Review inspector.** A collapsible side panel (⌥⌘0) shows todos, subagents and file changes for the selected session.
 - **Summarize a session.** Click Summarize at the top of the inspector, or right-click a session and choose Summarize Session (⌥⌘S). AgentMaster reads the session's transcript and runs `claude -p` in the background, with no tools and no saved session. The inspector then shows what was done, the changed files, open items and a short retrospective. The session itself is not interrupted. The summary is kept until you quit. This needs Claude Code installed, whichever agent ran the session.
 - **Header status.** The model and permission mode, plus context usage and cost where the agent reports them.
-- **Per-agent settings (⌘,).** Each agent has its own page. It shows where the binary was found and holds its defaults for new sessions, such as model, permission mode, sandbox and approval policy.
+- **Per-agent settings (⌘,).** Each agent has its own page. It shows where the binary was found and holds its defaults for new sessions, such as model, effort, speed, permission mode, sandbox and approval policy.
 - **Non-invasive.** Hooks are injected into each session through the agent's own command-line options, or for Kiro's V2 engine an agent config in the session's own folder. AgentMaster never edits your global Claude Code or Codex configuration. Kiro's V3 engine reads hooks only from Kiro's own folder, so for it AgentMaster adds one file, `~/.kiro/hooks/agentmaster.json`, which does nothing in sessions AgentMaster didn't start. If AgentMaster isn't running, every agent behaves as usual.
 
 ## Requirements

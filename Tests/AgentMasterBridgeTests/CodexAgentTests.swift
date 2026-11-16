@@ -37,24 +37,46 @@ final class CodexAgentTests: XCTestCase {
         XCTAssertEqual(args(["sandbox": "yolo", "approval": "untrusted"]), [])
     }
 
+    func testEffortIsPassedTrimmedAsAConfigOverride() {
+        XCTAssertEqual(args(["effort": "high"]), ["-c", #"model_reasoning_effort="high""#])
+        XCTAssertEqual(args(["effort": " none "]), ["-c", #"model_reasoning_effort="none""#], "a custom level is passed too")
+        XCTAssertEqual(args(["effort": "  "]), [])
+    }
+
+    func testEveryKnownSpeedIsPassedAsAServiceTier() {
+        for tier in ["default", "priority", "ultrafast"] {
+            XCTAssertEqual(args(["serviceTier": tier]), ["-c", "service_tier=\"\(tier)\""], tier)
+        }
+        XCTAssertEqual(args(["serviceTier": "turbo"]), [], "an unknown tier follows Codex's config")
+    }
+
     func testArgumentOrderIsFixed() {
-        XCTAssertEqual(args(["approval": "never", "sandbox": "read-only", "model": "o3"], hookArguments: ["H"], resumeId: "abc"),
-                       ["resume", "abc", "--model", "o3", "--sandbox", "read-only", "--ask-for-approval", "never", "H"])
+        XCTAssertEqual(args(["approval": "never", "sandbox": "read-only", "model": "o3", "effort": "xhigh",
+                             "serviceTier": "ultrafast"], hookArguments: ["H"], resumeId: "abc"),
+                       ["resume", "abc", "--model", "o3", "-c", #"model_reasoning_effort="xhigh""#,
+                        "-c", #"service_tier="ultrafast""#, "--sandbox", "read-only", "--ask-for-approval", "never", "H"])
     }
 
     // MARK: options
 
-    func testOptionsDeclareModelSandboxApprovalAndHooksInOrder() {
+    func testOptionsDeclareModelEffortSpeedSandboxApprovalAndHooksInOrder() {
         let options = CodexAgent().options(environment: [:])
-        XCTAssertEqual(options.map(\.id), [AgentOption.modelId, "sandbox", "approval", "hooks"])
+        XCTAssertEqual(options.map(\.id), [AgentOption.modelId, "effort", "serviceTier", "sandbox", "approval", "hooks"])
         XCTAssertEqual(options[0].kind, .choice([], allowsCustom: true))
-        guard case let .choice(modes, modesCustom) = options[1].kind else { return XCTFail("sandbox is a choice") }
+        guard case let .choice(efforts, effortsCustom) = options[1].kind else { return XCTFail("effort is a choice") }
+        XCTAssertEqual(efforts.map(\.value), ["low", "medium", "high", "xhigh", "max"])
+        XCTAssertTrue(effortsCustom, "which levels exist depends on the model")
+        guard case let .choice(tiers, tiersCustom) = options[2].kind else { return XCTFail("speed is a choice") }
+        XCTAssertEqual(tiers.map(\.value), ["default", "priority", "ultrafast"])
+        XCTAssertEqual(tiers.map(\.label), ["Standard", "Fast", "Ultrafast"])
+        XCTAssertFalse(tiersCustom)
+        guard case let .choice(modes, modesCustom) = options[3].kind else { return XCTFail("sandbox is a choice") }
         XCTAssertEqual(modes.map(\.value), ["read-only", "workspace-write", "danger-full-access"])
         XCTAssertFalse(modesCustom)
-        guard case let .choice(policies, policiesCustom) = options[2].kind else { return XCTFail("approval is a choice") }
+        guard case let .choice(policies, policiesCustom) = options[4].kind else { return XCTFail("approval is a choice") }
         XCTAssertEqual(policies.map(\.value), ["on-request", "never"])
         XCTAssertFalse(policiesCustom)
-        XCTAssertEqual(options[3].kind, .toggle(default: true))
+        XCTAssertEqual(options[5].kind, .toggle(default: true))
     }
 
     // MARK: hooks and resume

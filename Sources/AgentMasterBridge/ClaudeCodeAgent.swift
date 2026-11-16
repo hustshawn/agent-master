@@ -5,9 +5,12 @@ import AgentMasterWire
 /// Claude Code: hooks and the status line go in a per-session settings file passed with `--settings`.
 public struct ClaudeCodeAgent: AgentKind {
     public static let modelOption = AgentOption.modelId
+    public static let effortOption = "effort"
     public static let permissionModeOption = "permissionMode"
     public static let allowBypassOption = "allowBypass"
     public static let modelAliases = ["opus", "sonnet", "haiku", "fable"]
+    /// The values `claude --effort` accepts.
+    public static let efforts = ["low", "medium", "high", "xhigh", "max"]
     /// The values `claude --permission-mode` accepts.
     public static let permissionModes = ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"]
 
@@ -27,6 +30,8 @@ public struct ClaudeCodeAgent: AgentKind {
             AgentOption(id: Self.modelOption, title: "Default model", kind: .choice(
                 Self.modelAliases.map { AgentChoice(value: $0, detail: environment["ANTHROPIC_DEFAULT_\($0.uppercased())_MODEL"]) },
                 allowsCustom: true)),
+            AgentOption(id: Self.effortOption, title: "Default effort", kind: .choice(
+                Self.efforts.map { AgentChoice(value: $0) }, allowsCustom: false)),
             AgentOption(id: Self.permissionModeOption, title: "Default permission mode", kind: .choice(
                 Self.permissionModes.map { AgentChoice(value: $0, label: Self.permissionModeLabels[$0]) },
                 allowsCustom: false)),
@@ -83,6 +88,7 @@ public struct ClaudeCodeAgent: AgentKind {
     public func arguments(preferences: AgentPreferences, hookArguments: [String], resumeId: String?) -> [String] {
         var args = hookArguments
         if let model = preferences.string(Self.modelOption) { args += ["--model", model] }
+        if let effort = preferences.string(Self.effortOption), Self.efforts.contains(effort) { args += ["--effort", effort] }
         // An unknown mode would make claude refuse to start; follow its own settings instead.
         let mode = preferences.string(Self.permissionModeOption).flatMap { Self.permissionModes.contains($0) ? $0 : nil }
         if let mode { args += ["--permission-mode", mode] }

@@ -5,6 +5,8 @@ import AgentMasterCore
 /// per session with `-c hooks.<Event>=…`, which Codex only runs with its hook-trust check bypassed.
 public struct CodexAgent: AgentKind {
     public static let modelOption = AgentOption.modelId
+    public static let effortOption = "effort"
+    public static let serviceTierOption = "serviceTier"
     public static let sandboxOption = "sandbox"
     public static let approvalOption = "approval"
     public static let hooksOption = "hooks"
@@ -12,6 +14,10 @@ public struct CodexAgent: AgentKind {
     public static let sandboxModes = ["read-only", "workspace-write", "danger-full-access"]
     /// The values `codex --ask-for-approval` accepts (0.154 rejects `untrusted` and `on-failure`).
     public static let approvalPolicies = ["on-request", "never"]
+    /// Common `model_reasoning_effort` levels; which ones a model takes varies, and codex sends any value on as is.
+    public static let efforts = ["low", "medium", "high", "xhigh", "max"]
+    /// `service_tier` values: `default` is the standard speed, the others are the models' Fast and Ultrafast tiers.
+    public static let serviceTiers = ["default", "priority", "ultrafast"]
 
     public let id = "codex"
     public let displayName = "Codex"
@@ -55,6 +61,12 @@ public struct CodexAgent: AgentKind {
     public func options(environment: [String: String]) -> [AgentOption] {
         [
             AgentOption(id: Self.modelOption, title: "Default model", kind: .choice([], allowsCustom: true)),
+            AgentOption(id: Self.effortOption, title: "Default reasoning effort", kind: .choice(
+                Self.efforts.map { AgentChoice(value: $0) }, allowsCustom: true),
+                        note: "Levels depend on the model. Codex does not check them: one the model lacks fails every turn."),
+            AgentOption(id: Self.serviceTierOption, title: "Default speed", kind: .choice(
+                Self.serviceTiers.map { AgentChoice(value: $0, label: Self.labels[$0]) }, allowsCustom: false),
+                        note: "Tiers depend on the model. Codex leaves out one the model lacks, with a warning."),
             AgentOption(id: Self.sandboxOption, title: "Default sandbox", kind: .choice(
                 Self.sandboxModes.map { AgentChoice(value: $0, label: Self.labels[$0]) }, allowsCustom: false)),
             AgentOption(id: Self.approvalOption, title: "Default approval policy", kind: .choice(
@@ -69,6 +81,7 @@ public struct CodexAgent: AgentKind {
     static let labels = [
         "read-only": "Read only", "workspace-write": "Workspace write", "danger-full-access": "Full access (no sandbox)",
         "on-request": "On request", "never": "Never ask",
+        "default": "Standard", "priority": "Fast", "ultrafast": "Ultrafast",
     ]
 
     public func transcript(at path: String) -> [TranscriptEntry] {
@@ -98,6 +111,10 @@ public struct CodexAgent: AgentKind {
         var args: [String] = []
         if let resumeId { args += ["resume", resumeId] }
         if let model = preferences.string(Self.modelOption) { args += ["--model", model] }
+        if let effort = preferences.string(Self.effortOption) { args += ["-c", "model_reasoning_effort=\(Self.tomlString(effort))"] }
+        if let tier = preferences.string(Self.serviceTierOption), Self.serviceTiers.contains(tier) {
+            args += ["-c", "service_tier=\(Self.tomlString(tier))"]
+        }
         // An unknown value would make codex refuse to start; follow its own config instead.
         if let sandbox = preferences.string(Self.sandboxOption), Self.sandboxModes.contains(sandbox) {
             args += ["--sandbox", sandbox]

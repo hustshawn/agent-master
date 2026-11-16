@@ -38,7 +38,7 @@ public struct KiroAgent: AgentKind {
     public func options(environment: [String: String]) -> [AgentOption] {
         [
             AgentOption(id: Self.modelOption, title: "Default model", kind: .choice([], allowsCustom: true),
-                        note: "Run kiro-cli chat --list-models for the ids."),
+                        note: "The list is what kiro-cli chat --list-models gave when AgentMaster started; it is empty until you sign in to Kiro."),
             AgentOption(id: Self.engineOption, title: "Agent engine", kind: .choice(
                 Self.engines.map { AgentChoice(value: $0, label: $0.uppercased()) }, allowsCustom: false),
                         note: "Following Kiro uses its chat.agentEngine setting, which is V2 until you switch."),
@@ -47,6 +47,24 @@ public struct KiroAgent: AgentKind {
             AgentOption(id: Self.hooksOption, title: "Show session activity in panels", kind: .toggle(default: true),
                         note: "On V2 it replaces the default agent for the session, so agents in ~/.kiro/agents are not available in it. On V3 it adds ~/.kiro/hooks/agentmaster.json, which does nothing outside AgentMaster."),
         ]
+    }
+
+    /// The models `kiro-cli chat --list-models` offers the signed-in account (the same on both engines, kiro-cli 3.3).
+    public func modelChoices(environment: [String: String]) -> [AgentChoice]? {
+        guard let binary = executable.locate(environment: environment),
+              let output = CommandOutput.run(binary, arguments: ["chat", "--list-models", "--format", "json"],
+                                             environment: environment, timeout: 10)
+        else { return nil }
+        return Self.modelChoices(fromList: output)
+    }
+
+    /// Each listed model's id, with its description as the detail.
+    static func modelChoices(fromList data: Data) -> [AgentChoice]? {
+        let models = (try? JSONValue.parse(data))?["models"]?.arrayValue ?? []
+        let choices = models.compactMap { model in
+            model["model_id"]?.stringValue.map { AgentChoice(value: $0, detail: model["description"]?.stringValue) }
+        }
+        return choices.isEmpty ? nil : choices
     }
 
     public func transcript(at path: String) -> [TranscriptEntry] {

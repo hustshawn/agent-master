@@ -49,6 +49,45 @@ final class KiroAgentTests: XCTestCase {
         XCTAssertFalse(KiroAgent().hooksEnabled(preferences: AgentPreferences(values: ["hooks": "false"])))
     }
 
+    // MARK: models
+
+    private let list = Data("""
+        {"models": [
+          {"model_name": "auto", "description": "Models chosen by task", "model_id": "auto", "rate_multiplier": 1.0},
+          {"model_name": "claude-opus-5.5", "model_id": "claude-opus-5.5"}
+        ], "default_model": "auto"}
+        """.utf8)
+
+    func testModelChoicesAreTheListedModels() {
+        XCTAssertEqual(KiroAgent.modelChoices(fromList: list),
+                       [AgentChoice(value: "auto", detail: "Models chosen by task"), AgentChoice(value: "claude-opus-5.5")])
+    }
+
+    func testAnUnreadableOrEmptyListGivesNoChoices() {
+        XCTAssertNil(KiroAgent.modelChoices(fromList: Data("Not logged in".utf8)))
+        XCTAssertNil(KiroAgent.modelChoices(fromList: Data(#"{"models": []}"#.utf8)))
+    }
+
+    func testModelChoicesComeFromListModels() throws {
+        let kiro = try install.executable("kiro-cli")
+        try Data("""
+            #!/bin/sh
+            [ "$*" = "chat --list-models --format json" ] || exit 1
+            cat <<'JSON'
+            \(String(decoding: list, as: UTF8.self))
+            JSON
+            """.utf8).write(to: URL(fileURLWithPath: kiro))
+        XCTAssertEqual(KiroAgent().modelChoices(environment: ["AGENTMASTER_KIRO_PATH": kiro])?.map(\.value),
+                       ["auto", "claude-opus-5.5"])
+    }
+
+    func testSignedOutKiroGivesNoChoices() throws {
+        let kiro = try install.executable("kiro-cli")
+        try Data("#!/bin/sh\necho 'Not logged in. Set the KIRO_API_KEY environment variable' >&2\nexit 1\n".utf8)
+            .write(to: URL(fileURLWithPath: kiro))
+        XCTAssertNil(KiroAgent().modelChoices(environment: ["AGENTMASTER_KIRO_PATH": kiro]))
+    }
+
     // MARK: launch
 
     /// A scratch home, so a launch never writes to the real `~/.kiro`.

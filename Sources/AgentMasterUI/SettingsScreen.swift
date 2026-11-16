@@ -23,25 +23,29 @@ public struct SettingsAgentPage: Identifiable {
     }
 }
 
-/// Settings as a sidebar of pages: General first, then one page per agent. Storage stays with the caller.
-public struct SettingsScreen<General: View>: View {
+/// Settings as a sidebar of pages: one page per agent, then General and Keyboard Shortcuts. Storage stays with the caller.
+public struct SettingsScreen<General: View, Shortcuts: View>: View {
     static var generalId: String { "\u{0}general" }
+    static var shortcutsId: String { "\u{0}shortcuts" }
 
     let agents: [SettingsAgentPage]
     let preferences: (String) -> AgentPreferences
     let isForcedOn: (_ agentId: String, _ optionId: String) -> Bool
     let onSet: (_ agentId: String, _ optionId: String, _ value: String?) -> Void
     let general: General
+    let shortcuts: Shortcuts
     @State private var selection: String
 
     public init(agents: [SettingsAgentPage], preferences: @escaping (String) -> AgentPreferences,
                 isForcedOn: @escaping (String, String) -> Bool, onSet: @escaping (String, String, String?) -> Void,
-                initialSelection: String? = nil, @ViewBuilder general: () -> General) {
+                initialSelection: String? = nil, @ViewBuilder general: () -> General,
+                @ViewBuilder shortcuts: () -> Shortcuts) {
         self.agents = agents
         self.preferences = preferences
         self.isForcedOn = isForcedOn
         self.onSet = onSet
         self.general = general()
+        self.shortcuts = shortcuts()
         _selection = State(initialValue: initialSelection ?? agents.first?.id ?? Self.generalId)
     }
 
@@ -70,6 +74,10 @@ public struct SettingsScreen<General: View>: View {
                 Image(systemName: "gearshape").font(.system(size: 14)).foregroundStyle(Palette.muted).frame(width: 18)
                 Text("General")
             }
+            sidebarRow(Self.shortcutsId) {
+                Image(systemName: "keyboard").font(.system(size: 14)).foregroundStyle(Palette.muted).frame(width: 18)
+                Text("Shortcuts")
+            }
             Spacer()
         }
         .padding(10)
@@ -95,6 +103,12 @@ public struct SettingsScreen<General: View>: View {
     private var detail: some View {
         if let agent = agents.first(where: { $0.id == selection }) {
             page(agent)
+        } else if selection == Self.shortcutsId {
+            VStack(alignment: .leading, spacing: 0) {
+                pageHeader { Image(systemName: "keyboard").font(.system(size: 30)).foregroundStyle(Palette.muted) }
+                    title: { "Keyboard Shortcuts" } subtitle: { Text("Menu commands and switching sessions").foregroundStyle(Palette.muted) }
+                Form { shortcuts }.formStyle(.grouped).scrollContentBackground(.hidden)
+            }
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 pageHeader { Image(systemName: "gearshape").font(.system(size: 30)).foregroundStyle(Palette.muted) }

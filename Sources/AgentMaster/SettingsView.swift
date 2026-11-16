@@ -48,6 +48,7 @@ struct SettingsView: View {
                     }
                 }
             }
+        } shortcuts: {
             Section {
                 LabeledContent {
                     VStack(alignment: .trailing, spacing: 3) {
@@ -80,8 +81,6 @@ struct SettingsView: View {
                         }
                     }
                 }
-            } header: {
-                Text("Keyboard shortcuts")
             } footer: {
                 Text("Click a shortcut, then type the new one. Esc cancels, Delete removes it.")
                     .font(.caption).foregroundStyle(.secondary)

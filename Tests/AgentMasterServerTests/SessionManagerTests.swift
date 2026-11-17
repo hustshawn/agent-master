@@ -348,6 +348,8 @@ final class SessionManagerTests: XCTestCase {
                                "prompt": "the server tests fail now and then\nplease fix them"])
         XCTAssertTrue(wait { manager.list().first { $0.id == id }?.state.firstPrompt != nil })
         try hook(manager, id, ["hook_event_name": "Stop", "session_id": "c1", "last_assistant_message": "Fixed the race."])
+        // The socket is read on another thread: wait until the turn has ended there.
+        XCTAssertTrue(wait { manager.list().first { $0.id == id }?.status == "idle" })
     }
 
     func testTheFirstTurnNamesTheSessionOnce() throws {
@@ -363,20 +365,26 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertEqual(titleCalls(calls), 1)
     }
 
-    func testNoAITitleWhenTurnedOffOrAlreadyNamed() throws {
+    func testNoAITitleWhenTurnedOff() throws {
         let calls = try titlingClaude()
         let manager = try makeManager()
         manager.aiSessionTitles = false
-        let off = try manager.create(projectPath: project)
-        try firstTurn(manager, off.id)
-        manager.aiSessionTitles = true
-        let named = try manager.create(projectPath: project)
-        try manager.rename(id: named.id, to: "Mine")
-        try firstTurn(manager, named.id)
+        let session = try manager.create(projectPath: project)
+        try firstTurn(manager, session.id)
         Thread.sleep(forTimeInterval: 0.3)
         XCTAssertEqual(titleCalls(calls), 0)
-        XCTAssertEqual(manager.list().first { $0.id == off.id }?.title, "the server tests fail now and then")
-        XCTAssertEqual(manager.list().first { $0.id == named.id }?.title, "Mine")
+        XCTAssertEqual(manager.list().first?.title, "the server tests fail now and then")
+    }
+
+    func testNoAITitleForANamedSession() throws {
+        let calls = try titlingClaude()
+        let manager = try makeManager()
+        let session = try manager.create(projectPath: project)
+        try manager.rename(id: session.id, to: "Mine")
+        try firstTurn(manager, session.id)
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(titleCalls(calls), 0)
+        XCTAssertEqual(manager.list().first?.title, "Mine")
     }
 
     func testAReviewedMarkLastsUntilTheNextPromptAndAcrossARestart() throws {

@@ -13,10 +13,11 @@ public enum HookShim {
     /// Below the 600 s hook timeout written into the session settings.
     public static let defaultDecisionTimeout: TimeInterval = 590
 
+    /// Every PreToolUse waits for an answer: the policy rules (ADR 0017) may stop any tool call, and
+    /// AskUserQuestion is answered from it. With nothing to say the app answers at once with no output.
     public static func isDecision(_ payload: JSONValue) -> Bool {
         switch payload["hook_event_name"]?.stringValue {
-        case "PermissionRequest": return true
-        case "PreToolUse": return payload["tool_name"]?.stringValue == "AskUserQuestion"
+        case "PermissionRequest", "PreToolUse": return true
         default: return false
         }
     }

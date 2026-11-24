@@ -10,8 +10,21 @@ public final class ServerSettings: @unchecked Sendable {
         var options: [String: String] = [:]
         var recentProjects: [String] = []
         var restoreSessionsOnLaunch = true
-        /// Optional so a file written before it existed still decodes; nil means on.
+        /// nil means on.
         var aiSessionTitles: Bool?
+        var policies = PolicySettings()
+
+        init() {}
+
+        /// Every key may be missing, so a file written before a setting existed keeps all the others.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            options = try container.decodeIfPresent([String: String].self, forKey: .options) ?? [:]
+            recentProjects = try container.decodeIfPresent([String].self, forKey: .recentProjects) ?? []
+            restoreSessionsOnLaunch = try container.decodeIfPresent(Bool.self, forKey: .restoreSessionsOnLaunch) ?? true
+            aiSessionTitles = try container.decodeIfPresent(Bool.self, forKey: .aiSessionTitles)
+            policies = try container.decodeIfPresent(PolicySettings.self, forKey: .policies) ?? PolicySettings()
+        }
     }
 
     private let url: URL
@@ -68,6 +81,11 @@ public final class ServerSettings: @unchecked Sendable {
         set { write { $0.aiSessionTitles = newValue } }
     }
 
+    public var policies: PolicySettings {
+        get { read(\.policies) }
+        set { write { $0.policies = newValue } }
+    }
+
     private func read<T>(_ body: (Stored) -> T) -> T {
         lock.lock()
         defer { lock.unlock() }
@@ -80,6 +98,10 @@ public final class ServerSettings: @unchecked Sendable {
         body(&stored)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(stored) { try? data.write(to: url, options: .atomic) }
+        guard let data = try? encoder.encode(stored) else { return }
+        try? data.write(to: url, options: .atomic)
+        // Owner only: webhook URLs carry tokens. shortcut: set after the atomic rename, so the new file is
+        // readable under the umask for a moment; write through a 0600 temporary file if that ever matters.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }

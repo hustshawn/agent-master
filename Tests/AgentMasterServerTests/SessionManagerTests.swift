@@ -318,6 +318,75 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertEqual(pushes.urgencies.count, 3, "closing a session is not news")
     }
 
+    // MARK: policies
+
+    private func preToolUse(_ command: String) -> JSONValue {
+        ["hook_event_name": "PreToolUse", "session_id": "c1", "tool_name": "Bash", "tool_use_id": .string(UUID().uuidString),
+         "tool_input": ["command": .string(command)]]
+    }
+
+    func testAToolCallNothingObjectsToIsAnsweredAtOnceWithNoOutput() throws {
+        let manager = try makeManager()
+        let session = try manager.create(projectPath: project)
+        let started = Date()
+        let connection = try hook(manager, session.id, preToolUse("swift test"), kind: .request)
+        XCTAssertNil(try reply(connection))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+        XCTAssertEqual(manager.actionRequests, [])
+        XCTAssertTrue(wait { manager.list().first?.state.lastTool?.name == "Bash" }, "still reported as an event")
+    }
+
+    func testADangerousCommandWaitsForTheUser() throws {
+        let manager = try makeManager()
+        let events = Events()
+        _ = manager.subscribe { events.append($0) }
+        let session = try manager.create(projectPath: project)
+        func ask(_ decision: RemoteDecision) throws -> JSONValue? {
+            let connection = try hook(manager, session.id, preToolUse("rm -rf build"), kind: .request)
+            XCTAssertTrue(wait { manager.actionRequests.contains { $0.status == "pending" } })
+            let request = try XCTUnwrap(manager.actionRequests.first { $0.status == "pending" })
+            XCTAssertEqual(request.kind, "policy")
+            XCTAssertTrue(request.reason?.contains("dangerous-command") == true, request.reason ?? "")
+            XCTAssertEqual(manager.list().first?.status, "needsAttention")
+            try manager.answer(requestId: request.id, decision: decision)
+            return try reply(connection)?["hookSpecificOutput"]?["permissionDecision"]
+        }
+        XCTAssertEqual(try ask(.deny(message: "Not here", interrupt: false)), "deny")
+        XCTAssertEqual(try ask(.handBack), "ask", "Claude Code's own prompt takes over")
+        XCTAssertEqual(try ask(.allow), "allow")
+        XCTAssertTrue(events.list.contains { $0.type == "request" && $0.request?.kind == "policy" })
+    }
+
+    func testTheBudgetDeniesOnceASessionCostsTooMuch() throws {
+        let manager = try makeManager()
+        manager.policies = PolicySettings(cost: .init(denyAtUSD: 1))
+        let session = try manager.create(projectPath: project)
+        try hook(manager, session.id, ["model": ["display_name": "Opus"], "cost": ["total_cost_usd": 1.5]], kind: .statusline)
+        XCTAssertTrue(wait { manager.list().first?.state.usage?.costUSD == 1.5 })
+        let connection = try hook(manager, session.id, preToolUse("ls"), kind: .request)
+        let output = try reply(connection)?["hookSpecificOutput"]
+        XCTAssertEqual(output?["permissionDecision"], "deny")
+        XCTAssertEqual(manager.actionRequests, [], "a deny needs nobody")
+    }
+
+    func testAnOlderSettingsFileStillReadsAndOnlyItsOwnerCanReadIt() throws {
+        let url = root.appendingPathComponent("data/settings.json")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // As written before AI titles and policies existed.
+        try Data(#"{"options":{"agents.claude.model":"opus"},"recentProjects":[],"restoreSessionsOnLaunch":false}"#.utf8)
+            .write(to: url)
+        let manager = try makeManager()
+        XCTAssertEqual(manager.agents().first { $0.id == "claude" }?.defaultModel, "opus")
+        XCTAssertFalse(manager.restoreSessionsOnLaunch)
+        XCTAssertEqual(manager.policies, PolicySettings())
+        manager.policies = PolicySettings(maxToolCalls: 50)
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        manager.shutdown()
+        managers.removeAll()
+        XCTAssertEqual(try makeManager().policies.maxToolCalls, 50)
+    }
+
     func testAgentsListTheModelsTheAgentsReported() throws {
         let manager = try makeManager(modelCatalog: ["codex": [AgentChoice(value: "m1", label: "Model 1")]])
         let codexModel = manager.agents().first { $0.id == "codex" }?.options.first { $0.id == AgentOption.modelId }

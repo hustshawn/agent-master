@@ -72,6 +72,7 @@ public final class SessionManager: @unchecked Sendable {
     private let journalLock = NSLock()
     private var hookServer: HookServer?
     private let requests = ActionRequestStore()
+    private let policyBook = PolicyBook()
     private let messages = MessageStore()
     private let attachments = AttachmentStore()
     public let push: PushNotifier
@@ -172,6 +173,7 @@ public final class SessionManager: @unchecked Sendable {
             session?.processExited()
             guard let self else { return }
             self.requests.expire(sessionId: id, reason: "session ended")
+            self.policyBook.remove(sessionId: id)
             // A closed session is gone from the list by now; only an agent that quit by itself is news.
             if let session = self.session(id: id) {
                 self.push.notify(PushPayload(title: "Agent exited", body: session.json.title, sessionId: id, tag: "exit-\(id)"))
@@ -254,6 +256,7 @@ public final class SessionManager: @unchecked Sendable {
         lock.unlock()
         session.onChange = nil
         requests.expire(sessionId: id, reason: "session closed")
+        policyBook.remove(sessionId: id)
         messages.removeAll(sessionId: id)
         attachments.removeAll(sessionId: id)
         session.process.terminate()
@@ -406,12 +409,20 @@ public final class SessionManager: @unchecked Sendable {
 
     public var recentProjects: [String] { settings.recentProjects }
 
+    /// The rules every PreToolUse is checked against; a change applies from the next tool call.
+    public var policies: PolicySettings {
+        get { settings.policies }
+        set { settings.policies = newValue }
+    }
+
     // MARK: private
 
     private func route(_ message: WireMessage) {
         guard let session = session(id: message.sessionId) else { return }
         switch message.kind {
-        case .statusline: session.receive(statusLine: message.payload)
+        case .statusline:
+            session.receive(statusLine: message.payload)
+            policyBook.observe(statusLine: message.payload, sessionId: session.id)
         case .event, .request: session.receive(hook: message.payload)
         }
         // No request outlives its turn: a hook still waiting then was cancelled, or answered in the terminal.
@@ -433,24 +444,24 @@ public final class SessionManager: @unchecked Sendable {
         }
     }
 
-    /// Holds the hook for an answer from a browser when the agent can take one; otherwise its terminal asks,
-    /// as in the Mac app.
+    /// Checks a PreToolUse against the policy rules, and holds the hook for an answer from a browser when the
+    /// rules ask or the agent can take one; otherwise its terminal asks, as in the Mac app.
     private func open(_ message: WireMessage, reply: @escaping (String?) -> Void) {
-        // Every request an agent answers remotely can be denied, which is also what a timeout sends.
-        guard let session = session(id: message.sessionId),
-              session.agent.hookOutput(for: message.payload, decision: .deny(message: "", interrupt: false)) != nil else {
-            reply(nil)
-            return
+        guard let session = session(id: message.sessionId) else { return reply(nil) }
+        HookRequestRouter.route(sessionId: session.id, payload: message.payload, reply: reply, agent: session.agent,
+                                settings: settings.policies, policies: policyBook, requests: requests,
+                                remote: true) { request in
+            let question = request.input["questions"]?[0]?["question"]?.stringValue
+            switch request.kind {
+            case "question": session.apply([.needsAttention(message: question.map { "Question: " + $0 } ?? "Question")])
+            case "policy": session.apply([.needsAttention(message: "Policy: " + request.title)])
+            default: break
+            }
+            let heading = ["question": "Question · ", "policy": "Policy check · "][request.kind] ?? "Approval needed · "
+            push.notify(PushPayload(title: heading + session.json.title, body: PushNotifier.clipped(question ?? request.title),
+                                    sessionId: session.id, tag: "request-\(request.id)"),
+                        urgency: "high")
         }
-        let request = requests.open(sessionId: session.id, agent: session.agent, payload: message.payload, reply: reply)
-        let question = request.input["questions"]?[0]?["question"]?.stringValue
-        if request.kind == "question" {
-            session.apply([.needsAttention(message: question.map { "Question: " + $0 } ?? "Question")])
-        }
-        push.notify(PushPayload(title: (request.kind == "question" ? "Question · " : "Approval needed · ") + session.json.title,
-                                body: PushNotifier.clipped(question ?? request.title),
-                                sessionId: session.id, tag: "request-\(request.id)"),
-                    urgency: "high")
     }
 
     private func broadcast(_ event: ServerEvent) {

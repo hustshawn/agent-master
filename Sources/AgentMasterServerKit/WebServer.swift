@@ -3,12 +3,13 @@ import Hummingbird
 import HummingbirdWebSocket
 import NIOCore
 import Logging
+import AgentMasterCore
 import AgentMasterBridge
 
 /// The browser's API. Every /api route needs the server token, as `Authorization: Bearer <token>`
 /// or, for WebSockets (which cannot set headers from a browser), `?token=<token>`.
 ///
-///     GET    /api/agents                               agents, their settings, and General settings
+///     GET    /api/agents                               agents, their settings, General settings and the policy rules
 ///     PUT    /api/agents/{agent}/options/{option}      {"value": "..."|null}
 ///     PUT    /api/general                              {"restoreSessionsOnLaunch"?: bool, "aiSessionTitles"?: bool}
 ///     GET    /api/sessions                             every session
@@ -25,8 +26,10 @@ import AgentMasterBridge
 ///     PUT    /api/sessions/{id}/reviewed               {"reviewed": bool}: marks the last turn's result reviewed
 ///     POST   /api/sessions/{id}/interrupt              stops the current turn (Esc)
 ///     GET    /api/requests                             open and recently resolved approvals and questions
-///     POST   /api/requests/{id}                        {"behavior": "allow"|"deny", "message"?} or {"answers": {question: label}};
+///     POST   /api/requests/{id}                        {"behavior": "allow"|"deny", "message"?} or {"answers": {question: label}},
+///                                                      or {"behavior": "terminal"} for a policy request (ADR 0017);
 ///                                                      ActionRequestJSON (409 once answered or expired)
+///     PUT    /api/policies                             PolicySettings: replaces the policy rules
 ///     GET    /api/push/key                             {"publicKey"}: the VAPID key for pushManager.subscribe
 ///     GET    /api/push/subscriptions                   {"subscriptions": [{"endpoint", "label", "createdAt"}]}
 ///     POST   /api/push/subscriptions                   a PushSubscription's JSON plus "label"
@@ -57,7 +60,7 @@ public enum WebServer {
 
         api.get("agents") { _, _ in
             AgentsResponse(agents: manager.agents(), restoreSessionsOnLaunch: manager.restoreSessionsOnLaunch,
-                           aiSessionTitles: manager.aiSessionTitles, home: NSHomeDirectory())
+                           aiSessionTitles: manager.aiSessionTitles, policies: manager.policies, home: NSHomeDirectory())
         }
         api.put("agents/:agent/options/:option") { request, context -> HTTPResponse.Status in
             let body = try await request.decode(as: OptionRequest.self, context: context)
@@ -71,6 +74,10 @@ public enum WebServer {
             let body = try await request.decode(as: GeneralRequest.self, context: context)
             if let restore = body.restoreSessionsOnLaunch { manager.restoreSessionsOnLaunch = restore }
             if let titles = body.aiSessionTitles { manager.aiSessionTitles = titles }
+            return .noContent
+        }
+        api.put("policies") { request, context -> HTTPResponse.Status in
+            manager.policies = try await request.decode(as: PolicySettings.self, context: context)
             return .noContent
         }
 
@@ -156,8 +163,10 @@ public enum WebServer {
                 decision = .allow
             } else if body.behavior == "deny" {
                 decision = .deny(message: body.message ?? "The user denied this.", interrupt: false)
+            } else if body.behavior == "terminal" {
+                decision = .handBack
             } else {
-                throw HTTPError(.badRequest, message: "Send behavior allow or deny, or answers.")
+                throw HTTPError(.badRequest, message: "Send behavior allow, deny or terminal, or answers.")
             }
             return try mapErrors { try manager.answer(requestId: context.parameters.require("id"), decision: decision) }
         }
@@ -358,6 +367,7 @@ struct AgentsResponse: ResponseEncodable {
     let agents: [AgentJSON]
     let restoreSessionsOnLaunch: Bool
     let aiSessionTitles: Bool
+    let policies: PolicySettings
     let home: String
 }
 

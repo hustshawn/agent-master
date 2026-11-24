@@ -770,3 +770,9 @@ dialog.attach-sheet { padding: 0; }
   .settings-scope { padding: 14px 18px; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
+
+/* Policies (ADR 0017) */
+.policy-reason { white-space: pre-line; }
+.patterns-row { flex-direction: column; gap: 10px; }
+.policy-patterns { width: 100%; resize: vertical; font-family: var(--mono); font-size: 12px; border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; background: transparent; color: inherit; }

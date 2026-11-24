@@ -6,6 +6,8 @@ Usage: uv run --with websockets scripts/web-smoke.py [--agent claude|codex|kiro]
 Starts the server on a free port with a scratch data directory, sets the agent's defaults through the API,
 starts a session in a scratch project, answers the agent's first-run prompts, sends one task that edits a
 file, and checks that the session state (status, first prompt, file change) and the terminal stream arrive.
+Then (Claude and Codex) has the agent run `rm -rf` on a scratch folder: the policy request is denied once and
+allowed once, checking the folder after each.
 Costs a few cents of model tokens. Exits 0 on PASS.
 """
 import argparse, asyncio, json, os, re, shutil, socket, subprocess, sys, tempfile, time, urllib.error, urllib.request
@@ -52,6 +54,54 @@ class Api:
                 return response.status, json.loads(data) if data and is_json else data
         except urllib.error.HTTPError as error:
             return error.code, error.read().decode(errors="replace")
+
+
+async def policy_check(api, sid, work, events, failures):
+    """ADR 0017: an `rm -rf` hits the dangerous-command rule and waits on a policy card, even in bypass mode.
+    Denied once (the folder stays), then allowed (the folder goes). Kiro's hooks cannot stop a call."""
+    doomed = os.path.join(work, "doomed")
+    os.makedirs(doomed, exist_ok=True)
+    open(os.path.join(doomed, "keep.txt"), "w").close()
+
+    async def until(condition, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            found = condition()
+            if found:
+                return found
+            await asyncio.sleep(0.5)
+        return None
+
+    def latest():
+        return next((e["session"] for e in reversed(events) if e.get("session", {}).get("id") == sid), None)
+
+    for behavior in ("deny", "allow"):
+        seen = {e["request"]["id"] for e in events if e.get("type") == "request"}
+        await until(lambda: (latest() or {}).get("status") == "idle", 60)
+        status, body = api.call("POST", f"/api/sessions/{sid}/messages", {
+            "id": f"policy-{behavior}",
+            "text": "Run exactly this shell command, once, with no other commands: rm -rf doomed . "
+                    "If it is blocked, do not retry; reply Done."})
+        if status != 200:
+            failures.append(f"sending the rm -rf prompt returned {status}: {body}")
+            return
+        request = await until(lambda: next((e["request"] for e in events if e.get("type") == "request"
+                                            and e["request"]["id"] not in seen and e["request"]["kind"] == "policy"
+                                            and e["request"]["status"] == "pending"), None), 120)
+        if not request:
+            failures.append(f"rm -rf raised no policy request ({behavior} pass)")
+            return
+        status, body = api.call("POST", f"/api/requests/{request['id']}", {"behavior": behavior, "message": "Not in the smoke test"})
+        if status != 200:
+            failures.append(f"answering the policy request returned {status}: {body}")
+        await until(lambda: (latest() or {}).get("status") == "idle" and (latest() or {}).get("state", {}).get("lastMessage"), 120)
+        await asyncio.sleep(2)
+        exists = os.path.exists(doomed)
+        if behavior == "deny" and not exists:
+            failures.append("rm -rf ran although the policy request was denied")
+        if behavior == "allow" and exists:
+            failures.append("rm -rf did not run after the policy request was allowed")
+        print(f"policy {behavior}: doomed/ {'kept' if exists else 'deleted'}")
 
 
 async def run(args):
@@ -155,6 +205,9 @@ async def run(args):
                     latest = next((e["session"] for e in reversed(events) if e.get("session", {}).get("id") == sid), None)
                     if prompted and latest and latest["state"].get("lastMessage") and latest["status"] == "idle":
                         break
+
+                if args.agent != "kiro":
+                    await policy_check(api, sid, work, events, failures)
 
                 # A second browser (or a reload) gets the scrollback first.
                 async with websockets.connect(url, max_size=None) as again:

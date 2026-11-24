@@ -75,6 +75,7 @@ const state = {
   agents: [],                 // AgentJSON[]
   restoreSessionsOnLaunch: true,
   aiSessionTitles: true,
+  policies: null,             // PolicySettings, from GET /api/agents
   home: "/",
   terminals: new Map(),       // id -> { term, fit, socket, node, alive }
   events: null,
@@ -193,6 +194,7 @@ async function loadAgents() {
   state.agents = response.agents;
   state.restoreSessionsOnLaunch = response.restoreSessionsOnLaunch;
   state.aiSessionTitles = response.aiSessionTitles;
+  state.policies = response.policies;
   state.home = response.home;
 }
 
@@ -1029,7 +1031,10 @@ function refreshDecision(request) {
 }
 
 function renderDecision(request) {
-  if (request.kind === "permission") {
+  if (request.kind === "policy") {
+    $("decision-area").replaceChildren(policyDecisionCard(request));
+    $("decision-footer").replaceChildren(...policyFooter(request));
+  } else if (request.kind === "permission") {
     $("decision-area").replaceChildren(permissionDecisionCard(request));
     $("decision-footer").replaceChildren(...permissionFooter(request));
   } else {
@@ -1103,6 +1108,35 @@ function permissionDecisionCard(request) {
        state.answerNotes.get(request.id) ?? ""));
 }
 
+/// A tool call the policy rules asked about (ADR 0017). The agent's own approval prompt does not show while
+/// this waits, so handing it back to the terminal is always one click away.
+function policyDecisionCard(request) {
+  return el("div", { class: "decision-card policy-card" },
+    el("div", { class: "decision-label" }, icon("shield-check"), "Policy check"),
+    el("h2", {}, request.title),
+    el("p", { class: "decision-subtext policy-reason" }, request.reason ?? ""),
+    el("pre", { class: "permission-detail" }, detailText(request.input)),
+    el("textarea", { class: "decision-note", rows: 2, placeholder: "Reason, if you deny (optional)",
+                     oninput: (e) => state.answerNotes.set(request.id, e.target.value) },
+       state.answerNotes.get(request.id) ?? ""));
+}
+
+function policyFooter(request) {
+  // Codex takes no "ask": handing a call back there denies it, so only Claude Code gets the button.
+  const claude = state.sessions.get(request.sessionId)?.agentId === "claude";
+  return [
+    el("div", { class: "button-row" },
+      el("button", { class: "primary", type: "button", onclick: () => decide(request.id, { behavior: "allow" }) }, "Allow"),
+      el("button", { type: "button", onclick: () => decide(request.id,
+          { behavior: "deny", message: (state.answerNotes.get(request.id) ?? "").trim() || undefined }) }, "Deny"),
+      claude ? el("button", { type: "button", class: "policy-terminal",
+                              onclick: () => decide(request.id, { behavior: "terminal" }) }, "Answer in terminal") : null),
+    el("p", { class: "decision-help" }, claude
+      ? "Allow lets Claude Code's own permission rules decide; Answer in terminal shows its approval prompt."
+      : "If nobody answers, the call is denied."),
+  ];
+}
+
 function detailText(input) {
   if (typeof input?.command === "string") return input.command;
   if (typeof input?.file_path === "string") return input.file_path;
@@ -1146,6 +1180,9 @@ function resolvedCard(request) {
 function outcomeText(request) {
   if (request.status === "expired") return "Expired — " + (request.outcome ?? "timed out");
   if (request.kind === "permission") return request.outcome === "allowed" ? "Allowed" : "Denied";
+  if (request.kind === "policy") {
+    return { allowed: "Allowed", denied: "Denied", "handed to the terminal": "Handed to the terminal" }[request.outcome] ?? "Answered";
+  }
   return "Answered";
 }
 
@@ -2485,9 +2522,66 @@ function generalPage() {
                 markSaved();
               } catch (error) { alert(error.message); }
             } }), el("span")))),
+    el("h2", { class: "settings-group-label" }, "Policies"),
+    policiesSection(),
     el("h2", { class: "settings-group-label" }, "Notifications"),
     notificationsSection(),
   ];
+}
+
+// MARK: policies — rules every tool call is checked against before it runs (ADR 0017)
+
+/// A blank field turns its rule off.
+function numberOrNull(text) {
+  const value = Number(text.trim());
+  return text.trim() === "" || !Number.isFinite(value) || value < 0 ? null : value;
+}
+
+async function savePolicies(change) {
+  const policies = structuredClone(state.policies);
+  change(policies);
+  try {
+    await api("PUT", "/api/policies", policies);
+    state.policies = policies;
+    markSaved();
+  } catch (error) { alert(error.message); renderSettings(); }
+}
+
+function policiesSection() {
+  const policies = state.policies;
+  if (!policies) return el("section", { class: "settings-section" });
+  const disabled = !state.online;
+  const numberRow = (label, note, value, step, apply) =>
+    el("div", { class: "setting-row select-row" },
+      el("div", { class: "setting-description" }, el("label", {}, label), el("p", {}, note)),
+      el("div", { class: "setting-control" },
+        el("input", { type: "number", min: "0", step, placeholder: "Off", value: value ?? "", disabled, "aria-label": label,
+                      onchange: (e) => savePolicies((p) => apply(p, numberOrNull(e.target.value))) })));
+  return el("section", { class: "settings-section policies-section" },
+    numberRow("Ask when a session costs", "In US dollars, asked once per session. Claude Code only: Codex and Kiro report no cost. " +
+              "The cost can lag one turn behind.", policies.cost.askAtUSD, "0.5",
+              (p, v) => { p.cost.askAtUSD = v; }),
+    numberRow("Deny when a session costs", "Every tool call is denied from here on.", policies.cost.denyAtUSD, "0.5",
+              (p, v) => { p.cost.denyAtUSD = v; }),
+    numberRow("Ask after tool calls", "Per session; allowing lets as many more through.", policies.maxToolCalls, "1",
+              (p, v) => { p.maxToolCalls = v === null ? null : Math.floor(v); }),
+    el("div", { class: "setting-row toggle-row" },
+      el("div", { class: "setting-description" }, el("label", {}, "Ask before dangerous commands"),
+        el("p", {}, "Shell commands matching a pattern below, such as rm -rf or a forced push. The patterns match text, " +
+                    "so bash -c or a script gets past them: a guard rail, not a sandbox. Not for Kiro, whose hooks cannot stop a call. " +
+                    "In Codex, a call nobody answers is denied.")),
+      el("label", { class: "settings-switch" },
+        el("input", { type: "checkbox", checked: policies.dangerousBash.enabled, disabled,
+                      "aria-label": "Ask before dangerous commands",
+                      onchange: (e) => savePolicies((p) => { p.dangerousBash.enabled = e.target.checked; }) }), el("span"))),
+    el("div", { class: "setting-row patterns-row" },
+      el("div", { class: "setting-description" }, el("label", { for: "policy-patterns" }, "Dangerous command patterns"),
+        el("p", {}, "Regular expressions, one per line, matched without regard to case.")),
+      el("textarea", { id: "policy-patterns", class: "policy-patterns", rows: 8, spellcheck: "false", disabled,
+                       onchange: (e) => savePolicies((p) => {
+                         p.dangerousBash.patterns = e.target.value.split("\n").map((l) => l.trim()).filter(Boolean);
+                       }) },
+         policies.dangerousBash.patterns.join("\n"))));
 }
 
 function renderSettings() {

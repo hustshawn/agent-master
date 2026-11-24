@@ -17,7 +17,8 @@
 | [0010](0010-agent-adapter.md) | Agent 适配层：每个 agent 只描述自己的差异 | 已接受 |
 | [0011](0011-web-edition.md) | Web 版：agentmaster-server + 浏览器界面 | 已接受 |
 | [0012](0012-kiro-agent.md) | 接入 Kiro CLI 作为第三个 agent | 已接受；默认模型的选项由 0015 改为读 kiro-cli 的模型列表 |
-| [0013](0013-cross-device-control.md) | 跨端协作：聊天视图、远程审批和手机推送 | 已接受 |
+| [0013](0013-cross-device-control.md) | 跨端协作：聊天视图、远程审批和手机推送 | 已接受；审批由 0017 扩展到 Mac App 和会话策略 |
 | [0014](0014-kiro-v3-engine.md) | 支持 Kiro CLI 的 V3 引擎 | 已接受 |
 | [0015](0015-codex-model-list.md) | Codex 和 Kiro 的默认模型从 CLI 自己的模型列表里选 | 已接受 |
 | [0016](0016-ai-session-titles.md) | 会话标题在第一轮后由 AI 起 | 已接受 |
+| [0017](0017-approvals-policies-and-notifications.md) | 原生审批、会话策略与"需要你"通知 | 已接受 |

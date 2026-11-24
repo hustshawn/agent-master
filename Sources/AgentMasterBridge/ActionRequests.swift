@@ -92,13 +92,16 @@ public final class ActionRequestStore: @unchecked Sendable {
         return pending.values.map(\.request).sorted { $0.createdAt < $1.createdAt }
     }
 
-    /// An approval (PermissionRequest) or a question (AskUserQuestion), answered with `agent.hookOutput`.
+    /// An approval (PermissionRequest) or a question (AskUserQuestion), answered with `agent.hookOutput`;
+    /// handing it back answers with no output, so the agent's own UI asks.
     @discardableResult
     public func open(sessionId: String, agent: any AgentKind, payload: JSONValue,
                      reply: @escaping (String?) -> Void) -> ActionRequestJSON {
         let kind = payload["hook_event_name"]?.stringValue == "PermissionRequest" ? "permission" : "question"
         return add(sessionId: sessionId, kind: kind, payload: payload, reason: nil,
-                   output: { decision in agent.hookOutput(for: payload, decision: decision).map { .some($0) } },
+                   output: { decision in
+                       decision == .handBack ? .some(nil) : agent.hookOutput(for: payload, decision: decision).map { .some($0) }
+                   },
                    timedOut: timeoutDecision.flatMap { agent.hookOutput(for: payload, decision: $0) },
                    expired: nil, onAllow: nil, reply: reply)
     }

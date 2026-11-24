@@ -14,6 +14,19 @@ public enum GeneralSettings {
     public static func aiSessionTitles(_ defaults: UserDefaults) -> Bool {
         defaults.object(forKey: aiSessionTitlesKey) as? Bool ?? true
     }
+
+    /// The policy rules (ADR 0017), as the JSON the server keeps under the same key in settings.json.
+    public static let policiesKey = "policies"
+
+    public static func policies(_ defaults: UserDefaults) -> PolicySettings {
+        defaults.string(forKey: policiesKey).flatMap { try? JSONDecoder().decode(PolicySettings.self, from: Data($0.utf8)) }
+            ?? PolicySettings()
+    }
+
+    public static func setPolicies(_ policies: PolicySettings, _ defaults: UserDefaults) {
+        guard let data = try? JSONEncoder().encode(policies) else { return }
+        defaults.set(String(decoding: data, as: UTF8.self), forKey: policiesKey)
+    }
 }
 
 /// What the app knows about one open session when it writes the journal.

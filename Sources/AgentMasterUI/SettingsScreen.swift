@@ -23,9 +23,10 @@ public struct SettingsAgentPage: Identifiable {
     }
 }
 
-/// Settings as a sidebar of pages: one page per agent, then General and Keyboard Shortcuts. Storage stays with the caller.
-public struct SettingsScreen<General: View, Shortcuts: View>: View {
+/// Settings as a sidebar of pages: one page per agent, then General, Policies and Keyboard Shortcuts. Storage stays with the caller.
+public struct SettingsScreen<General: View, Policies: View, Shortcuts: View>: View {
     static var generalId: String { "\u{0}general" }
+    static var policiesId: String { "\u{0}policies" }
     static var shortcutsId: String { "\u{0}shortcuts" }
 
     let agents: [SettingsAgentPage]
@@ -33,18 +34,20 @@ public struct SettingsScreen<General: View, Shortcuts: View>: View {
     let isForcedOn: (_ agentId: String, _ optionId: String) -> Bool
     let onSet: (_ agentId: String, _ optionId: String, _ value: String?) -> Void
     let general: General
+    let policies: Policies
     let shortcuts: Shortcuts
     @State private var selection: String
 
     public init(agents: [SettingsAgentPage], preferences: @escaping (String) -> AgentPreferences,
                 isForcedOn: @escaping (String, String) -> Bool, onSet: @escaping (String, String, String?) -> Void,
                 initialSelection: String? = nil, @ViewBuilder general: () -> General,
-                @ViewBuilder shortcuts: () -> Shortcuts) {
+                @ViewBuilder policies: () -> Policies, @ViewBuilder shortcuts: () -> Shortcuts) {
         self.agents = agents
         self.preferences = preferences
         self.isForcedOn = isForcedOn
         self.onSet = onSet
         self.general = general()
+        self.policies = policies()
         self.shortcuts = shortcuts()
         _selection = State(initialValue: initialSelection ?? agents.first?.id ?? Self.generalId)
     }
@@ -73,6 +76,10 @@ public struct SettingsScreen<General: View, Shortcuts: View>: View {
             sidebarRow(Self.generalId) {
                 Image(systemName: "gearshape").font(.system(size: 14)).foregroundStyle(Palette.muted).frame(width: 18)
                 Text("General")
+            }
+            sidebarRow(Self.policiesId) {
+                Image(systemName: "checkmark.shield").font(.system(size: 14)).foregroundStyle(Palette.muted).frame(width: 18)
+                Text("Policies")
             }
             sidebarRow(Self.shortcutsId) {
                 Image(systemName: "keyboard").font(.system(size: 14)).foregroundStyle(Palette.muted).frame(width: 18)
@@ -103,6 +110,12 @@ public struct SettingsScreen<General: View, Shortcuts: View>: View {
     private var detail: some View {
         if let agent = agents.first(where: { $0.id == selection }) {
             page(agent)
+        } else if selection == Self.policiesId {
+            VStack(alignment: .leading, spacing: 0) {
+                pageHeader { Image(systemName: "checkmark.shield").font(.system(size: 30)).foregroundStyle(Palette.muted) }
+                    title: { "Policies" } subtitle: { Text("Checked before every tool call").foregroundStyle(Palette.muted) }
+                Form { policies }.formStyle(.grouped).scrollContentBackground(.hidden)
+            }
         } else if selection == Self.shortcutsId {
             VStack(alignment: .leading, spacing: 0) {
                 pageHeader { Image(systemName: "keyboard").font(.system(size: 30)).foregroundStyle(Palette.muted) }

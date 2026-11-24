@@ -27,7 +27,7 @@ import AgentMasterBridge
 ///     POST   /api/sessions/{id}/interrupt              stops the current turn (Esc)
 ///     GET    /api/requests                             open and recently resolved approvals and questions
 ///     POST   /api/requests/{id}                        {"behavior": "allow"|"deny", "message"?} or {"answers": {question: label}},
-///                                                      or {"behavior": "terminal"} for a policy request (ADR 0017);
+///                                                      or {"behavior": "terminal"}: the agent's own UI decides (ADR 0017);
 ///                                                      ActionRequestJSON (409 once answered or expired)
 ///     PUT    /api/policies                             PolicySettings: replaces the policy rules
 ///     GET    /api/push/key                             {"publicKey"}: the VAPID key for pushManager.subscribe

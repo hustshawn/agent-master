@@ -9,7 +9,7 @@ public enum RemoteDecision: Equatable, Sendable {
     case deny(message: String, interrupt: Bool)
     /// AskUserQuestion: each question's text mapped to the chosen label (labels joined by ", " for multi-select).
     case answer([String: String])
-    /// "Answer in the terminal": for a policy request only, the agent's own approval decides (see PolicyReply).
+    /// "Answer in the terminal": the agent's own UI decides; for a policy request, see PolicyReply.handBack.
     case handBack
 }
 

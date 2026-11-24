@@ -42,7 +42,7 @@ final class ActionRequestStoreTests: XCTestCase {
         let store = ActionRequestStore()
         let replies = Replies()
         let request = store.open(sessionId: "s1", agent: ClaudeCodeAgent(), payload: permission, reply: replies.append)
-        XCTAssertThrowsError(try store.answer(request.id, decision: .handBack), "an approval cannot be handed back") {
+        XCTAssertThrowsError(try store.answer(request.id, decision: .answer(["q": "a"]))) {
             guard case ActionRequestError.unsupportedDecision = $0 else { return XCTFail("\($0)") }
         }
         try store.answer(request.id, decision: .deny(message: "No", interrupt: false))
@@ -55,6 +55,14 @@ final class ActionRequestStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.answer("nope", decision: .allow)) {
             guard case ActionRequestError.unknown = $0 else { return XCTFail("\($0)") }
         }
+    }
+
+    func testAnApprovalHandedToTheTerminalGetsNoOutput() throws {
+        let store = ActionRequestStore()
+        let replies = Replies()
+        let request = store.open(sessionId: "s1", agent: ClaudeCodeAgent(), payload: permission, reply: replies.append)
+        XCTAssertEqual(try store.answer(request.id, decision: .handBack).outcome, "handed to the terminal")
+        XCTAssertEqual(replies.list, [nil])
     }
 
     func testAPolicyRequestIsAllowedDeniedOrHandedBack() throws {

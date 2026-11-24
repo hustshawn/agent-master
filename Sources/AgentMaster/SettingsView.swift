@@ -11,6 +11,9 @@ struct SettingsView: View {
     @AppStorage(GeneralSettings.aiSessionTitlesKey) private var aiSessionTitles = true
     @AppStorage(HotkeyMap.storageKey) private var hotkeys = HotkeyMap()
     @State private var switchProblem: String?
+    @State private var policies = GeneralSettings.policies(.standard)
+    /// As typed, blank lines included; saved as the patterns without them.
+    @State private var patternsText = GeneralSettings.policies(.standard).dangerousBash.patterns.joined(separator: "\n")
     private let store = AgentPreferenceStore(defaults: .standard)
 
     var body: some View {
@@ -48,6 +51,8 @@ struct SettingsView: View {
                     }
                 }
             }
+        } policies: {
+            policySections
         } shortcuts: {
             Section {
                 LabeledContent {
@@ -85,6 +90,72 @@ struct SettingsView: View {
                 Text("Click a shortcut, then type the new one. Esc cancels, Delete removes it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// The Policies page (ADR 0017): stored as one JSON value under the server's key name.
+    @ViewBuilder
+    private var policySections: some View {
+        Section {
+            policyNumber("Ask when a session costs (USD)",
+                         note: "Asked once per session. Claude Code only: Codex and Kiro report no cost. The cost can lag one turn behind.",
+                         value: \.cost.askAtUSD)
+            policyNumber("Deny when a session costs (USD)", note: "Every tool call is denied from here on.",
+                         value: \.cost.denyAtUSD)
+            LabeledContent {
+                // Commits on Return or leaving the field; blank turns the rule off.
+                TextField("Off", value: Binding(
+                    get: { policies.maxToolCalls },
+                    set: { value in updatePolicies { $0.maxToolCalls = value.flatMap { $0 > 0 ? $0 : nil } } }),
+                          format: .number)
+                    .frame(width: 90).multilineTextAlignment(.trailing)
+            } label: {
+                settingLabel("Ask after tool calls", note: "Per session; allowing lets as many more through.")
+            }
+        }
+        Section {
+            Toggle(isOn: Binding(get: { policies.dangerousBash.enabled },
+                                 set: { value in updatePolicies { $0.dangerousBash.enabled = value } })) {
+                settingLabel("Ask before dangerous commands",
+                             note: "Shell commands matching a pattern below, such as rm -rf or a forced push. The patterns match text, so bash -c or a script gets past them: a guard rail, not a sandbox. Not for Kiro, whose hooks cannot stop a call. In Codex, a call nobody answers is denied.")
+            }
+            TextEditor(text: $patternsText)
+                .font(.system(size: 11, design: .monospaced))
+                .frame(minHeight: 140)
+                .onChange(of: patternsText) { _, text in
+                    updatePolicies { policies in
+                        policies.dangerousBash.patterns = text.split(separator: "\n")
+                            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                    }
+                }
+        } footer: {
+            Text("Regular expressions, one per line, matched without regard to case. Changes apply from the next tool call.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func updatePolicies(_ change: (inout PolicySettings) -> Void) {
+        change(&policies)
+        GeneralSettings.setPolicies(policies, .standard)
+    }
+
+    private func settingLabel(_ title: String, note: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+            Text(note).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// A dollar amount; blank turns the rule off.
+    private func policyNumber(_ title: String, note: String, value: WritableKeyPath<PolicySettings, Double?>) -> some View {
+        LabeledContent {
+            TextField("Off", value: Binding(
+                get: { policies[keyPath: value] },
+                set: { amount in updatePolicies { $0[keyPath: value] = amount.flatMap { $0 >= 0 ? $0 : nil } } }),
+                      format: .number)
+                .frame(width: 90).multilineTextAlignment(.trailing)
+        } label: {
+            settingLabel(title, note: note)
         }
     }
 

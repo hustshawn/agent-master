@@ -49,7 +49,8 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
   因为用户就在这台电脑上，终端里的审批框还在。策略 ASK 的到点回复见下表，两端一样。
 - **Mac App**：终端区底部的浮层。审批卡：允许、拒绝、在终端处理；提问卡：按 `questions` 渲染选项，点一个就答。
   "始终允许（写入 `permission_suggestions`）"和多选不进第一版。
-- **Web 版**：沿用已有卡片和 `POST /api/requests/{id}`。`behavior` 多一个 `"terminal"`，只对 policy 卡有效，意思是"交给 agent 自己决定"。
+- **Web 版**：沿用已有卡片和 `POST /api/requests/{id}`。`behavior` 多一个 `"terminal"`，意思是"交给 agent 自己决定"：
+  审批和提问回空输出，policy 卡见下表。
 - **Codex 和 Kiro 的 `PermissionRequest` 仍在终端里审批**（跟 0013 一样），要先录 0.160 的 fixture，见待定问题。
 
 ### 2. 策略层（ALLOW / ASK / DENY）

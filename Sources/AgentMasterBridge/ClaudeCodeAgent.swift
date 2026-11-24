@@ -73,7 +73,25 @@ public struct ClaudeCodeAgent: AgentKind {
         default:
             return nil
         }
-        return (try? JSONValue.object(["hookSpecificOutput": output]).encoded()).map { String(decoding: $0, as: UTF8.self) }
+        return Self.encode(output)
+    }
+
+    /// "ask" hands the call to Claude Code's own approval prompt, with the reason shown to the user.
+    public func policyHookOutput(_ reply: PolicyReply) -> String?? {
+        switch reply {
+        case .allow:
+            return Self.encode(["hookEventName": "PreToolUse", "permissionDecision": "allow"])
+        case .deny(let reason):
+            return Self.encode(["hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                "permissionDecisionReason": .string(reason)])
+        case .handBack(let reason):
+            return Self.encode(["hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                "permissionDecisionReason": .string(reason)])
+        }
+    }
+
+    static func encode(_ output: JSONValue) -> String? {
+        (try? JSONValue.object(["hookSpecificOutput": output]).encoded()).map { String(decoding: $0, as: UTF8.self) }
     }
 
     public func hooksEnabled(preferences: AgentPreferences) -> Bool { true }

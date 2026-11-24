@@ -5,14 +5,26 @@ import Logging
 /// settings.json. Every key may be missing.
 public struct NotificationSettings: Codable, Equatable, Sendable {
     public struct Webhook: Codable, Equatable, Sendable {
+        /// Stable across edits, so Settings can send back a masked URL and the right stored one is kept: several
+        /// webhooks on one host (two Telegram bots) mask to the same text.
+        public var id: String
         /// A secret: an ntfy topic or a Telegram bot token is in it. Shown masked (see `masked`), never logged.
         public var url: String
         /// "ntfy", "telegram" or "json".
         public var format: String
 
-        public init(url: String, format: String) {
+        public init(id: String = UUID().uuidString, url: String, format: String) {
+            self.id = id
             self.url = url
             self.format = format
+        }
+
+        /// A webhook written before ids existed, or added in Settings, gets a new one.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+            url = try container.decode(String.self, forKey: .url)
+            format = try container.decode(String.self, forKey: .format)
         }
     }
 
@@ -45,18 +57,18 @@ public struct NotificationSettings: Codable, Equatable, Sendable {
 
     /// These settings as Settings shows them: webhook URLs masked.
     public var masked: NotificationSettings {
-        NotificationSettings(webhooks: webhooks.map { Webhook(url: Self.masked($0.url), format: $0.format) },
+        NotificationSettings(webhooks: webhooks.map { Webhook(id: $0.id, url: Self.masked($0.url), format: $0.format) },
                              publicURL: publicURL)
     }
 
-    /// `incoming` from Settings, where a webhook whose URL is still the masked form keeps its stored URL.
+    /// `incoming` from Settings, where a webhook whose URL is still the masked form keeps the stored URL with
+    /// its id; one with a masked URL and no stored match is dropped, as its URL is unknown.
     public func merging(_ incoming: NotificationSettings) -> NotificationSettings {
-        var stored = webhooks
+        let stored = Dictionary(webhooks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let kept = incoming.webhooks.compactMap { hook -> Webhook? in
             guard hook.url.contains(Self.mask) else { return hook }
-            guard let index = stored.firstIndex(where: { Self.masked($0.url) == hook.url }) else { return nil }
-            let old = stored.remove(at: index)
-            return Webhook(url: old.url, format: hook.format)
+            guard let old = stored[hook.id] else { return nil }
+            return Webhook(id: old.id, url: old.url, format: hook.format)
         }
         let publicURL = incoming.publicURL?.trimmingCharacters(in: .whitespacesAndNewlines)
         return NotificationSettings(webhooks: kept, publicURL: publicURL?.isEmpty == false ? publicURL : nil)
@@ -119,7 +131,9 @@ final class WebhookNotifier: @unchecked Sendable {
     /// The HTTP request one webhook gets; nil for an unknown format or a URL that does not parse.
     static func request(for event: WebhookEvent, webhook: NotificationSettings.Webhook,
                         publicURL: String?) -> (format: String, url: URL, headers: [String: String], body: Data)? {
-        guard let url = URL(string: webhook.url), url.scheme == "https" || url.scheme == "http" else { return nil }
+        // Telegram's URL carries the bot token, so never over plain HTTP (review of #19, N3).
+        guard let url = URL(string: webhook.url), url.scheme == "https" || (url.scheme == "http" && webhook.format != "telegram")
+        else { return nil }
         let link = publicURL.map { base in
             (base.hasSuffix("/") ? String(base.dropLast()) : base) + "/#session=" + event.sessionId
         }

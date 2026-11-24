@@ -89,6 +89,9 @@ public enum WebServer {
             if let bad = body.webhooks.first(where: { !NotificationSettings.formats.contains($0.format) }) {
                 throw HTTPError(.badRequest, message: "Unknown webhook format \(bad.format); use ntfy, telegram or json.")
             }
+            if body.webhooks.contains(where: { $0.format == "telegram" && $0.url.lowercased().hasPrefix("http://") }) {
+                throw HTTPError(.badRequest, message: "A Telegram webhook carries the bot token, so it must use https.")
+            }
             manager.notifications = body
             return .noContent
         }

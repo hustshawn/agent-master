@@ -107,9 +107,19 @@ public final class ServerSettings: @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(stored) else { return }
-        try? data.write(to: url, options: .atomic)
-        // Owner only: webhook URLs carry tokens. shortcut: set after the atomic rename, so the new file is
-        // readable under the umask for a moment; write through a 0600 temporary file if that ever matters.
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        Self.writeOwnerOnly(data, to: url)
+    }
+
+    /// Owner only from the first byte, since webhook URLs carry tokens: a temporary file created 0600, then
+    /// renamed over the old one, so a reader never sees a half-written file either.
+    static func writeOwnerOnly(_ data: Data, to url: URL) {
+        let temporary = url.path + ".tmp-\(getpid())"
+        let fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+        guard fd >= 0 else { return }
+        fchmod(fd, 0o600)   // O_TRUNC kept an older file's mode
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        let written = (try? handle.write(contentsOf: data)) != nil
+        try? handle.close()
+        if written { rename(temporary, url.path) } else { unlink(temporary) }
     }
 }

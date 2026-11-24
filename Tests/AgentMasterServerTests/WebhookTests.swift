@@ -43,19 +43,46 @@ final class WebhookTests: XCTestCase {
     }
 
     func testURLsAreMaskedAndAMaskedURLKeepsTheStoredOne() {
-        let stored = NotificationSettings(webhooks: [.init(url: "https://ntfy.sh/secret-topic", format: "ntfy"),
-                                                     .init(url: "https://api.telegram.org/bot1:X/sendMessage?chat_id=1",
+        let stored = NotificationSettings(webhooks: [.init(id: "a", url: "https://ntfy.sh/secret-topic", format: "ntfy"),
+                                                     .init(id: "b", url: "https://api.telegram.org/bot1:X/sendMessage?chat_id=1",
                                                            format: "telegram")])
         let shown = stored.masked
         XCTAssertEqual(shown.webhooks.map(\.url), ["https://ntfy.sh/••••", "https://api.telegram.org/••••"])
+        XCTAssertEqual(shown.webhooks.map(\.id), ["a", "b"])
         // Settings sends the list back with the first one's format changed, the second removed and a new one added.
-        let incoming = NotificationSettings(webhooks: [.init(url: "https://ntfy.sh/••••", format: "json"),
-                                                       .init(url: "https://hooks.example/new", format: "json")],
+        let incoming = NotificationSettings(webhooks: [.init(id: "a", url: "https://ntfy.sh/••••", format: "json"),
+                                                       .init(id: "n", url: "https://hooks.example/new", format: "json")],
                                             publicURL: "  ")
         let merged = stored.merging(incoming)
-        XCTAssertEqual(merged.webhooks, [.init(url: "https://ntfy.sh/secret-topic", format: "json"),
-                                         .init(url: "https://hooks.example/new", format: "json")])
+        XCTAssertEqual(merged.webhooks, [.init(id: "a", url: "https://ntfy.sh/secret-topic", format: "json"),
+                                         .init(id: "n", url: "https://hooks.example/new", format: "json")])
         XCTAssertNil(merged.publicURL, "blank is no address")
+    }
+
+    /// Two bots on one host mask alike; removing the first must keep the second's URL (review of #19, S4).
+    func testWebhooksOnOneHostKeepTheirOwnURLs() throws {
+        let stored = NotificationSettings(webhooks: [
+            .init(id: "first", url: "https://api.telegram.org/bot1:A/sendMessage?chat_id=1", format: "telegram"),
+            .init(id: "second", url: "https://api.telegram.org/bot2:B/sendMessage?chat_id=2", format: "telegram"),
+        ])
+        let shown = stored.masked
+        XCTAssertEqual(shown.webhooks[0].url, shown.webhooks[1].url, "the masks alone cannot tell them apart")
+        let merged = stored.merging(NotificationSettings(webhooks: [shown.webhooks[1]]))
+        XCTAssertEqual(merged.webhooks.map(\.url), ["https://api.telegram.org/bot2:B/sendMessage?chat_id=2"])
+        let reordered = stored.merging(NotificationSettings(webhooks: shown.webhooks.reversed()))
+        XCTAssertEqual(reordered.webhooks.map(\.id), ["second", "first"])
+        XCTAssertEqual(reordered.webhooks.map(\.url), stored.webhooks.reversed().map(\.url))
+        // A file written before ids existed decodes with fresh ones.
+        let old = try JSONDecoder().decode(NotificationSettings.self, from: Data(
+            #"{"webhooks":[{"url":"https://ntfy.sh/x","format":"ntfy"},{"url":"https://ntfy.sh/y","format":"ntfy"}]}"#.utf8))
+        XCTAssertEqual(Set(old.webhooks.map(\.id)).count, 2)
+    }
+
+    func testTelegramIsNeverPostedOverPlainHTTP() {
+        XCTAssertNil(WebhookNotifier.request(for: event, webhook: .init(url: "http://api.telegram.org/bot1:A/sendMessage",
+                                                                         format: "telegram"), publicURL: nil))
+        XCTAssertNotNil(WebhookNotifier.request(for: event, webhook: .init(url: "http://ntfy.local/topic", format: "ntfy"),
+                                                publicURL: nil))
     }
 
     func testOlderSettingsDecodeWithoutTheKeys() throws {

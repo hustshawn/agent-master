@@ -103,7 +103,7 @@ def main():
                 os.makedirs(os.path.join(work, "doomed"), exist_ok=True)
                 page.click(".term-pane:not([hidden])")
                 time.sleep(0.5)
-                page.keyboard.type("Run exactly this shell command once: rm -rf doomed . If it is blocked, do not retry.")
+                page.keyboard.type("Run this exact shell command once: `rm -rf doomed`. If it is blocked, do not retry.")
                 page.keyboard.press("Enter")
                 page.wait_for_selector("#decision-area:not([hidden]) .policy-card", timeout=120000)
                 assert "dangerous-command" in page.inner_text(".policy-card"), "the card does not say why it asks"

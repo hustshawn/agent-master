@@ -80,8 +80,10 @@ async def policy_check(api, sid, work, events, failures):
         await until(lambda: (latest() or {}).get("status") == "idle", 60)
         status, body = api.call("POST", f"/api/sessions/{sid}/messages", {
             "id": f"policy-{behavior}",
-            "text": "Run exactly this shell command, once, with no other commands: rm -rf doomed . "
-                    "If it is blocked, do not retry; reply Done."})
+            "text": ("Run this exact shell command once, with no other commands: `rm -rf doomed`. If it is blocked, "
+                     "do not retry; reply Done." if behavior == "deny" else
+                     "I have changed my mind and will allow it now: run `rm -rf doomed` once more, exactly as written, "
+                     "then reply Done.")})
         if status != 200:
             failures.append(f"sending the rm -rf prompt returned {status}: {body}")
             return
@@ -172,6 +174,7 @@ async def run(args):
                     await term.send(json.dumps({"type": "input", "data": text}))
 
                 answered, prompted, deadline, quiet_since = set(), False, time.time() + 300, time.time()
+                add_dir_tries = 0
                 while time.time() < deadline:
                     try:
                         chunk = await asyncio.wait_for(term.recv(), timeout=0.5)
@@ -190,6 +193,13 @@ async def run(args):
                         await asyncio.sleep(2); await send("\x1b[B"); await asyncio.sleep(0.5); await send("\r")
                         screen = b""
                         continue
+                    # claude 2.1.32x also asks to trust the session folder passed with --add-dir; a keystroke can
+                    # land before the dialog takes input, so it is answered again while it stays on screen.
+                    if add_dir_tries < 4 and b"Yes,addit" in flat[-400:] and b"Entertoconfirm" in flat[-400:]:
+                        add_dir_tries += 1
+                        await asyncio.sleep(1); await send("\x1b[B"); await asyncio.sleep(0.5); await send("\r")
+                        screen, quiet_since = b"", time.time()
+                        continue
                     # Claude's folder trust dialog, then Codex's (worded differently across Codex versions).
                     if "trust" not in answered and (b"Entertoconfirm" in flat or b"Doyoutrustthecontents" in flat
                                                     or b"Trustthisfolder?" in flat):
@@ -199,14 +209,14 @@ async def run(args):
                         await asyncio.sleep(0.5); await send("\r")
                         screen = b""
                         continue
-                    if not prompted and time.time() - quiet_since > 3 and len(screen) > 0:
+                    if not prompted and time.time() - quiet_since > 3 and len(screen) > 0 and b"Entertoconfirm" not in flat:
                         await send(PROMPT); await asyncio.sleep(1); await send("\r")
                         prompted = True
                     latest = next((e["session"] for e in reversed(events) if e.get("session", {}).get("id") == sid), None)
                     if prompted and latest and latest["state"].get("lastMessage") and latest["status"] == "idle":
                         break
 
-                if args.agent != "kiro":
+                if args.agent != "kiro" and prompted:
                     await policy_check(api, sid, work, events, failures)
 
                 # A second browser (or a reload) gets the scrollback first.

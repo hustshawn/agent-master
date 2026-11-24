@@ -164,3 +164,13 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
    在 `/api/events` 上等 policy 请求，先拒绝一次、确认文件还在，再允许一次、确认已删除；`scripts/web-ui-check.py` 检查卡片能显示和收起。
 7. Mac App 浮层和 Policies 设置。
 8. 通知：Mac 的 `UNUserNotificationCenter`，服务端 webhook（ntfy 的单元测试只校验请求的头和正文，不连外网）。Web Push 已由 0013 做完。
+
+### 实施记录（2026-11-24）
+
+- 1–8 步都已实现。挂起表、policy 路由（`HookRequestRouter`）和 `PolicyBook` 在 Bridge，Mac App 和服务端共用。
+- 审批和提问卡也接受"在终端处理"：回空输出，交回 agent 自己的界面。
+- 用 Linux 上的 Claude Code 2.1.327 跑 `scripts/web-smoke.py`：bypassPermissions 模式下 `rm -rf` 照样被 `PreToolUse` 拦下出 policy 卡，
+  拒绝后 Claude 收到理由、文件夹还在。第一次实测时模型把命令写成了 `rm -rf doomed .`（连当前目录一起删），也被规则拦下，
+  所以测试提示词改成用反引号给出完整命令。
+- 没有实测的：Codex 的 `PreToolUse` deny 输出（本机 codex 未登录），Mac App 的浮层、Policies 页和通知（Linux 上编不了 AppKit/SwiftUI，靠 macOS CI）。
+- 第 3 节的 webhook 已做；节流规则见待定问题。Web Push 早由 0013 做完，没有改动。

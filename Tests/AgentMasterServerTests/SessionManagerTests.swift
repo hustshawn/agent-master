@@ -359,7 +359,7 @@ final class SessionManagerTests: XCTestCase {
             XCTAssertTrue(wait { manager.actionRequests.contains { $0.status == "pending" } })
             let request = try XCTUnwrap(manager.actionRequests.first { $0.status == "pending" })
             XCTAssertEqual(request.kind, "policy")
-            XCTAssertTrue(request.reason?.contains("dangerous-command") == true, request.reason ?? "")
+            XCTAssertTrue(request.reason?.contains("looks dangerous") == true, request.reason ?? "")
             XCTAssertEqual(manager.list().first?.status, "needsAttention")
             try manager.answer(requestId: request.id, decision: decision)
             return try reply(connection)?["hookSpecificOutput"]?["permissionDecision"]
@@ -423,6 +423,43 @@ final class SessionManagerTests: XCTestCase {
         managers.removeAll()
         let data = try String(contentsOf: root.appendingPathComponent("data/settings.json"), encoding: .utf8)
         XCTAssertTrue(data.contains("secret-topic"), "the stored URL survived the masked round trip")
+    }
+
+    /// The first prompt can hold secrets; webhooks go through third parties (review of #19, B2).
+    func testWebhooksNameASessionWithoutItsFirstPrompt() throws {
+        let manager = try makeManager()
+        manager.notifications = NotificationSettings(webhooks: [.init(url: "https://hooks.example/x", format: "json")])
+        let session = try manager.create(projectPath: project)
+        try hook(manager, session.id, ["hook_event_name": "UserPromptSubmit", "session_id": "c1",
+                                       "prompt": "deploy with token sk-secret-123 please"])
+        XCTAssertTrue(wait { manager.list().first?.state.firstPrompt != nil })
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1"])
+        XCTAssertTrue(wait { self.posts.list.count == 1 })
+        let first = try XCTUnwrap(posts.list.first)
+        XCTAssertFalse(first.body.contains("sk-secret"), first.body)
+        XCTAssertTrue(first.body.contains("Turn finished · project"), "the folder's name stands in: \(first.body)")
+        // A restored name may be the first prompt (the journal keeps it as the title): not used either.
+        let restored = try manager.create(projectPath: project, title: "sk-secret-456 in the restored title")
+        try hook(manager, restored.id, ["hook_event_name": "Stop", "session_id": "c2"])
+        XCTAssertTrue(wait { self.posts.list.count == 2 })
+        XCTAssertFalse(posts.list[1].body.contains("sk-secret"), posts.list[1].body)
+        // A name the user gives is.
+        try manager.rename(id: session.id, to: "Release")
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1"])
+        XCTAssertTrue(wait { self.posts.list.count == 3 })
+        XCTAssertTrue(posts.list[2].body.contains("Turn finished · Release"), posts.list[2].body)
+    }
+
+    /// Stopping releases waiting hooks with no output, which Codex reads as "run it" (review of #19, S1).
+    func testShuttingDownDeniesACodexPolicyCheckInsteadOfLettingItRun() throws {
+        try script("bin/codex", "#!/bin/sh\nexec cat\n")
+        let manager = try makeManager(["AGENTMASTER_CODEX_PATH": root.appendingPathComponent("bin/codex").path])
+        let session = try manager.create(projectPath: project, agentId: "codex")
+        let connection = try hook(manager, session.id, preToolUse("rm -rf build"), kind: .request)
+        XCTAssertTrue(wait { manager.actionRequests.contains { $0.kind == "policy" && $0.status == "pending" } })
+        manager.shutdown()
+        managers.removeAll()
+        XCTAssertEqual(try reply(connection)?["hookSpecificOutput"]?["permissionDecision"], "deny")
     }
 
     func testAgentsListTheModelsTheAgentsReported() throws {

@@ -68,15 +68,18 @@ public final class ActionRequestStore: @unchecked Sendable {
 
     /// Below HookShim.defaultDecisionTimeout (590 s), so the agent gets this store's answer rather than a silent timeout.
     public let timeout: TimeInterval
+    /// For approvals and questions; `timeout` when nil. Policy checks always get `timeout`.
+    private let approvalTimeout: TimeInterval?
     private let timeoutDecision: RemoteDecision?
     private let lock = NSLock()
     private var pending: [String: Pending] = [:]
     private var resolved: [ActionRequestJSON] = []
     public var onChange: (@Sendable (ActionRequestJSON) -> Void)?
 
-    public init(timeout: TimeInterval = 580,
+    public init(timeout: TimeInterval = 580, approvalTimeout: TimeInterval? = nil,
                 timeoutDecision: RemoteDecision? = .deny(message: ActionRequestStore.awayMessage, interrupt: true)) {
         self.timeout = timeout
+        self.approvalTimeout = approvalTimeout
         self.timeoutDecision = timeoutDecision
     }
 
@@ -98,7 +101,7 @@ public final class ActionRequestStore: @unchecked Sendable {
     public func open(sessionId: String, agent: any AgentKind, payload: JSONValue,
                      reply: @escaping (String?) -> Void) -> ActionRequestJSON {
         let kind = payload["hook_event_name"]?.stringValue == "PermissionRequest" ? "permission" : "question"
-        return add(sessionId: sessionId, kind: kind, payload: payload, reason: nil,
+        return add(sessionId: sessionId, kind: kind, payload: payload, reason: nil, timeout: approvalTimeout ?? timeout,
                    output: { decision in
                        decision == .handBack ? .some(nil) : agent.hookOutput(for: payload, decision: decision).map { .some($0) }
                    },
@@ -112,7 +115,7 @@ public final class ActionRequestStore: @unchecked Sendable {
     public func openPolicy(sessionId: String, agent: any AgentKind, payload: JSONValue, reason: String,
                            onAllow: @escaping () -> Void, reply: @escaping (String?) -> Void) -> ActionRequestJSON? {
         guard let handBack = agent.policyHookOutput(.handBack(reason: Self.unansweredPolicyMessage)) else { return nil }
-        return add(sessionId: sessionId, kind: "policy", payload: payload, reason: reason,
+        return add(sessionId: sessionId, kind: "policy", payload: payload, reason: reason, timeout: timeout,
                    output: { decision in
                        switch decision {
                        case .allow: return agent.policyHookOutput(.allow)
@@ -124,7 +127,7 @@ public final class ActionRequestStore: @unchecked Sendable {
                    timedOut: handBack, expired: handBack, onAllow: onAllow, reply: reply)
     }
 
-    private func add(sessionId: String, kind: String, payload: JSONValue, reason: String?,
+    private func add(sessionId: String, kind: String, payload: JSONValue, reason: String?, timeout: TimeInterval,
                      output: @escaping (RemoteDecision) -> String??, timedOut: String?, expired: String?,
                      onAllow: (() -> Void)?, reply: @escaping (String?) -> Void) -> ActionRequestJSON {
         let now = Date()
@@ -171,6 +174,14 @@ public final class ActionRequestStore: @unchecked Sendable {
     public func expire(sessionId: String, reason: String) {
         lock.lock()
         let ids = pending.values.filter { $0.request.sessionId == sessionId }.map(\.request.id)
+        lock.unlock()
+        for id in ids { resolve(id, outcome: reason, status: "expired") { .some($0.expired) } }
+    }
+
+    /// Ends every open request, before the hook server stops: see `expire`.
+    public func expireAll(reason: String) {
+        lock.lock()
+        let ids = Array(pending.keys)
         lock.unlock()
         for id in ids { resolve(id, outcome: reason, status: "expired") { .some($0.expired) } }
     }

@@ -34,8 +34,10 @@ final class AppModel {
     @ObservationIgnored private let newSessionPanel = NewSessionPanel()
     @ObservationIgnored private var environmentTask: Task<[String: String], Never>?
     /// Approvals, questions and policy checks waiting on a card. Unanswered ones go back to the terminal,
-    /// since the user is at this Mac (the server denies instead; ADR 0013, 0017).
-    @ObservationIgnored let requests = ActionRequestStore(timeoutDecision: nil)
+    /// since the user is at this Mac (the server denies instead; ADR 0013, 0017). Approvals and questions wait
+    /// only 30 s: Claude Code may not draw its own prompt while the hook waits, and a user who does not see the
+    /// card would see a stuck terminal. shortcut: untested on a real Mac; make it longer once checked there.
+    @ObservationIgnored let requests = ActionRequestStore(approvalTimeout: 30, timeoutDecision: nil)
     @ObservationIgnored private let policyBook = PolicyBook()
     /// Which agent each session runs, for the hook thread, which cannot read `sessions`.
     @ObservationIgnored private let sessionAgents = SessionAgents()
@@ -169,6 +171,8 @@ final class AppModel {
         do {
             let base = await environment()
             let id = UUID().uuidString
+            // Before the agent starts, so its first hook already finds which agent it is.
+            sessionAgents[id] = agent
             var preferences = preferenceStore.preferences(for: agent.id)
             if let model { preferences.values[AgentOption.modelId] = model }
             let launch = try agent.launch(AgentLaunchRequest(
@@ -180,7 +184,6 @@ final class AppModel {
                                        environment: launch.environment, currentDirectory: projectPath))
             session.customName = title
             session.onStateChange = { [weak self] in self?.persistOpenSessions() }
-            sessionAgents[id] = agent
             sessions.append(session)
             selectedId = id
             recents.record(projectPath)
@@ -256,6 +259,8 @@ final class AppModel {
     func shutdown() {
         // Terminating below marks every session ended; the journal must keep what was open.
         journal.freeze()
+        // Before stopping the hook server, which would release a Codex policy check with no output: "run it".
+        requests.expireAll(reason: "AgentMaster quit")
         server?.stop()
         server = nil
         sessions.forEach { $0.terminal.terminate() }

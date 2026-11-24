@@ -18,9 +18,30 @@ public enum GeneralSettings {
     /// The policy rules (ADR 0017), as the JSON the server keeps under the same key in settings.json.
     public static let policiesKey = "policies"
 
+    /// Read on every tool call, so the decoded value is kept until the stored text changes.
     public static func policies(_ defaults: UserDefaults) -> PolicySettings {
-        defaults.string(forKey: policiesKey).flatMap { try? JSONDecoder().decode(PolicySettings.self, from: Data($0.utf8)) }
-            ?? PolicySettings()
+        let raw = defaults.string(forKey: policiesKey)
+        return policiesCache.value(for: raw) {
+            raw.flatMap { try? JSONDecoder().decode(PolicySettings.self, from: Data($0.utf8)) } ?? PolicySettings()
+        }
+    }
+
+    private static let policiesCache = DecodedCache()
+
+    private final class DecodedCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var raw: String??
+        private var value = PolicySettings()
+
+        func value(for raw: String?, decode: () -> PolicySettings) -> PolicySettings {
+            lock.lock()
+            defer { lock.unlock() }
+            if self.raw != .some(raw) {
+                value = decode()
+                self.raw = .some(raw)
+            }
+            return value
+        }
     }
 
     public static func setPolicies(_ policies: PolicySettings, _ defaults: UserDefaults) {

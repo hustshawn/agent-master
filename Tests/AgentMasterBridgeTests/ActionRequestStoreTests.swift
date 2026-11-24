@@ -38,6 +38,31 @@ final class ActionRequestStoreTests: XCTestCase {
         XCTAssertEqual(store.all.first?.outcome, "timed out")
     }
 
+    /// The Mac's short window for approvals and questions (review of #19, S5); policy checks keep the long one.
+    func testApprovalsCanTimeOutSoonerThanPolicyChecks() throws {
+        let store = ActionRequestStore(timeout: 5, approvalTimeout: 0.05, timeoutDecision: nil)
+        let replies = Replies()
+        let approval = store.open(sessionId: "s1", agent: ClaudeCodeAgent(), payload: permission, reply: replies.append)
+        let policy = try XCTUnwrap(store.openPolicy(sessionId: "s1", agent: ClaudeCodeAgent(), payload: dangerous,
+                                                    reason: "r", onAllow: {}, reply: replies.append))
+        XCTAssertLessThan(approval.expiresAt - approval.createdAt, 1)
+        XCTAssertGreaterThan(policy.expiresAt - policy.createdAt, 4)
+        XCTAssertTrue(wait { replies.list.count == 1 })
+        XCTAssertEqual(replies.list, [nil], "the approval went back to the terminal")
+        XCTAssertEqual(store.open.map(\.kind), ["policy"])
+    }
+
+    func testExpiringEverythingHandsBackPolicyChecksAndReleasesTheRest() {
+        let store = ActionRequestStore()
+        let replies = Replies()
+        store.open(sessionId: "s1", agent: ClaudeCodeAgent(), payload: permission, reply: replies.append)
+        store.openPolicy(sessionId: "s2", agent: CodexAgent(), payload: dangerous, reason: "r", onAllow: {}, reply: replies.append)
+        store.expireAll(reason: "AgentMaster quit")
+        XCTAssertEqual(replies.list.count, 2)
+        XCTAssertEqual(replies.json.compactMap(decision), ["deny"], "Codex's policy check is denied; the approval gets no output")
+        XCTAssertEqual(store.open, [])
+    }
+
     func testTheFirstAnswerWinsAndTheRestAreRefused() throws {
         let store = ActionRequestStore()
         let replies = Replies()

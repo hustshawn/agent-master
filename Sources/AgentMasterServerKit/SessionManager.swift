@@ -183,7 +183,7 @@ public final class SessionManager: @unchecked Sendable {
             // A closed session is gone from the list by now; only an agent that quit by itself is news.
             if let session = self.session(id: id) {
                 self.push.notify(PushPayload(title: "Agent exited", body: session.json.title, sessionId: id, tag: "exit-\(id)"))
-                self.webhooks.notify(WebhookEvent(kind: "exit", sessionId: id, sessionTitle: session.json.title))
+                self.webhooks.notify(WebhookEvent(kind: "exit", sessionId: id, sessionTitle: session.webhookName))
             }
         }
         settings.recordProject(projectPath)
@@ -354,6 +354,9 @@ public final class SessionManager: @unchecked Sendable {
         journalLock.lock()
         journal.freeze()
         journalLock.unlock()
+        // Answer the waiting hooks first: stopping the hook server would release them with no output, which a
+        // Codex policy check reads as "run it" (review of #19, S1). Expired, a policy check is handed back.
+        requests.expireAll(reason: "AgentMaster stopped")
         hookServer?.stop()
         hookServer = nil
         lock.lock()
@@ -453,7 +456,7 @@ public final class SessionManager: @unchecked Sendable {
             push.notify(PushPayload(title: "Turn finished · \(json.title)",
                                     body: PushNotifier.clipped(json.state.lastMessage ?? "Ready for your next message."),
                                     sessionId: session.id, tag: "turn-\(session.id)"))
-            webhooks.notify(WebhookEvent(kind: "turn", sessionId: session.id, sessionTitle: json.title))
+            webhooks.notify(WebhookEvent(kind: "turn", sessionId: session.id, sessionTitle: session.webhookName))
         case "SessionEnd": requests.expire(sessionId: session.id, reason: "session ended")
         default: break
         }
@@ -477,7 +480,7 @@ public final class SessionManager: @unchecked Sendable {
                                     sessionId: session.id, tag: "request-\(request.id)"),
                         urgency: "high")
             webhooks.notify(WebhookEvent(kind: request.kind == "permission" ? "approval" : request.kind,
-                                         sessionId: session.id, sessionTitle: session.json.title))
+                                         sessionId: session.id, sessionTitle: session.webhookName))
         }
     }
 

@@ -63,10 +63,11 @@ public struct PolicySettings: Codable, Equatable, Sendable {
 
     public struct DangerousBash: Codable, Equatable, Sendable {
         public var enabled: Bool
-        /// Case-insensitive regular expressions matched against a Bash call's command; invalid ones are skipped.
+        /// The user's own case-insensitive regular expressions, checked on each simple command of a Bash call
+        /// after the built-in checks (`DangerousCommand`); invalid ones are skipped.
         public var patterns: [String]
 
-        public init(enabled: Bool = true, patterns: [String] = PolicySettings.defaultPatterns) {
+        public init(enabled: Bool = true, patterns: [String] = []) {
             self.enabled = enabled
             self.patterns = patterns
         }
@@ -74,7 +75,7 @@ public struct PolicySettings: Codable, Equatable, Sendable {
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-            patterns = try container.decodeIfPresent([String].self, forKey: .patterns) ?? PolicySettings.defaultPatterns
+            patterns = try container.decodeIfPresent([String].self, forKey: .patterns) ?? []
         }
     }
 
@@ -96,25 +97,6 @@ public struct PolicySettings: Codable, Equatable, Sendable {
         dangerousBash = try container.decodeIfPresent(DangerousBash.self, forKey: .dangerousBash) ?? DangerousBash()
         maxToolCalls = try container.decodeIfPresent(Int.self, forKey: .maxToolCalls)
     }
-
-    /// Text matching, so `bash -c`, variables or a script file get past them; they are a guard rail.
-    /// `[^|;&]*` keeps a match inside one command of a pipeline or list.
-    public static let defaultPatterns = [
-        // rm -rf, -fr, -Rf, and the flags written apart (-r … -f, --recursive … --force)
-        #"\brm\s+(?:[^|;&]*\s)?-[a-z]*(?:r[a-z]*f|f[a-z]*r)"#,
-        #"\brm(?=\s)[^|;&]*(?:\s-[a-z]*r[a-z]*|--recursive)\b[^|;&]*(?:\s-[a-z]*f[a-z]*|--force)\b"#,
-        #"\brm(?=\s)[^|;&]*(?:\s-[a-z]*f[a-z]*|--force)\b[^|;&]*(?:\s-[a-z]*r[a-z]*|--recursive)\b"#,
-        #"\bgit\b[^|;&]*\bpush\b[^|;&]*\s(?:--force|--force-with-lease|-f)\b"#,
-        #"\bgit\b[^|;&]*\breset\b[^|;&]*\s--hard\b"#,
-        #"\bgit\b[^|;&]*\bclean\b[^|;&]*\s-[a-z]*f"#,
-        #"\bterraform\b[^|;&]*\b(?:apply|destroy)\b"#,
-        #"\bkubectl\b[^|;&]*\bdelete\b"#,
-        #"\bdrop\s+(?:table|database)\b"#,
-        #"\bmkfs\b"#,
-        #"\bdd\b[^|;&]*\bof=/dev/"#,
-        #"\bchmod\s[^|;&]*-[a-z]*r[^|;&]*\s0?777\b"#,
-        #"\b(?:curl|wget)\b[^|;]*\|\s*(?:sudo\s+)?(?:ba|z)?sh\b"#,
-    ]
 }
 
 /// One AgentMaster session's policy bookkeeping; lives in memory and goes with the session.
@@ -162,15 +144,15 @@ public enum PolicyReducer {
         }
 
         if settings.dangerousBash.enabled, toolName == "Bash", let command = input["command"]?.stringValue,
-           let pattern = firstMatch(command, patterns: settings.dangerousBash.patterns) {
-            findings.append(PolicyFinding(rule: .dangerousBash, verdict: .ask,
-                                          reason: "The command matches a dangerous-command pattern: \(pattern)"))
+           let reason = dangerousReason(command, patterns: settings.dangerousBash.patterns) {
+            findings.append(PolicyFinding(rule: .dangerousBash, verdict: .ask, reason: reason))
         }
 
         state.toolCalls += 1
         if let max = settings.maxToolCalls, max > 0, state.toolCalls > (state.toolCallAllowance ?? max) {
-            findings.append(PolicyFinding(rule: .maxToolCalls, verdict: .ask, reason:
-                "This session has made \(state.toolCalls - 1) tool calls, its limit of \(max)."))
+            findings.append(PolicyFinding(rule: .maxToolCalls, verdict: .ask, reason: state.toolCallAllowance == nil
+                ? "This session has made \(max) tool calls, its limit."
+                : "This session has made another \(max) tool calls since you last allowed more."))
         }
         return PolicyCheck(findings: findings)
     }
@@ -184,12 +166,29 @@ public enum PolicyReducer {
         }
     }
 
-    /// The first pattern that matches `command`, case-insensitively; patterns that do not compile are skipped.
-    public static func firstMatch(_ command: String, patterns: [String]) -> String? {
-        let range = NSRange(command.startIndex..., in: command)
-        return patterns.first { pattern in
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return false }
-            return regex.firstMatch(in: command, range: range) != nil
+    /// Longer commands are not checked but asked about: every check is linear, this only bounds the work.
+    public static let maxCommandLength = 1_000_000
+    /// The user's own patterns run on simple commands up to this long; a longer one is asked about, since a
+    /// regular expression can take exponential time.
+    public static let maxPatternInputLength = 4_096
+    /// How long the user's patterns may run on one call before it is asked about instead.
+    public static let patternTimeout: TimeInterval = 0.1
+
+    /// Why a Bash command needs the user's OK, or nil: the built-in checks, then the user's patterns.
+    public static func dangerousReason(_ command: String, patterns: [String]) -> String? {
+        guard command.utf8.count <= maxCommandLength else {
+            return "The command is too long to check (\(command.utf8.count / 1000) KB)."
+        }
+        if let found = DangerousCommand.finding(in: command) { return "The command looks dangerous: \(found)." }
+        guard !patterns.isEmpty else { return nil }
+        let segments = DangerousCommand.split(command).map(\.text)
+        if segments.contains(where: { $0.utf8.count > maxPatternInputLength }) {
+            return "A command is too long for your dangerous-command patterns to check."
+        }
+        switch PatternMatcher.firstMatch(segments, patterns: patterns, timeout: patternTimeout) {
+        case .match(let pattern): return "The command matches your dangerous-command pattern: \(pattern)"
+        case .timedOut: return "Your dangerous-command patterns took too long to check this command."
+        case .none: return nil
         }
     }
 

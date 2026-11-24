@@ -219,7 +219,7 @@ final class WebServerTests: XCTestCase {
             }
             XCTAssertEqual(self.manager.policies.cost.askAtUSD, 5)
             XCTAssertFalse(self.manager.policies.dangerousBash.enabled)
-            XCTAssertEqual(self.manager.policies.dangerousBash.patterns, PolicySettings.defaultPatterns, "missing keys default")
+            XCTAssertEqual(self.manager.policies.dangerousBash.patterns, [], "missing keys default")
             try await client.execute(uri: "/api/agents", method: .get, headers: self.auth) {
                 let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(buffer: $0.body)) as? [String: Any])
                 let policies = try XCTUnwrap(json["policies"] as? [String: Any])

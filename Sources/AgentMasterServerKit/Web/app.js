@@ -76,6 +76,7 @@ const state = {
   restoreSessionsOnLaunch: true,
   aiSessionTitles: true,
   policies: null,             // PolicySettings, from GET /api/agents
+  notifications: null,        // NotificationSettings (webhook URLs masked), from GET /api/agents
   home: "/",
   terminals: new Map(),       // id -> { term, fit, socket, node, alive }
   events: null,
@@ -195,6 +196,7 @@ async function loadAgents() {
   state.restoreSessionsOnLaunch = response.restoreSessionsOnLaunch;
   state.aiSessionTitles = response.aiSessionTitles;
   state.policies = response.policies;
+  state.notifications = response.notifications;
   state.home = response.home;
 }
 
@@ -2526,7 +2528,58 @@ function generalPage() {
     policiesSection(),
     el("h2", { class: "settings-group-label" }, "Notifications"),
     notificationsSection(),
+    webhooksSection(),
   ];
+}
+
+// MARK: webhooks — the server also posts to ntfy, Telegram or any URL when a session needs you (ADR 0017)
+
+async function saveNotifications(change) {
+  const notifications = structuredClone(state.notifications);
+  change(notifications);
+  try {
+    await api("PUT", "/api/notifications", notifications);
+    await loadAgents();   // URLs come back masked
+    markSaved();
+  } catch (error) { alert(error.message); }
+  renderSettings();
+}
+
+function webhooksSection() {
+  const notifications = state.notifications;
+  if (!notifications) return el("section", { class: "settings-section" });
+  const disabled = !state.online;
+  const formats = [["ntfy", "ntfy"], ["telegram", "Telegram"], ["json", "JSON"]];
+  const rows = notifications.webhooks.map((hook, index) =>
+    el("div", { class: "setting-row webhook-row" },
+      el("select", { disabled, "aria-label": "Webhook format",
+                     onchange: (e) => saveNotifications((n) => { n.webhooks[index].format = e.target.value; }) },
+        ...formats.map(([value, label]) => el("option", { value, selected: hook.format === value }, label))),
+      el("code", { class: "webhook-url" }, hook.url),
+      el("button", { type: "button", disabled,
+                     onclick: () => saveNotifications((n) => { n.webhooks.splice(index, 1); }) }, "Remove")));
+  const url = el("input", { type: "url", placeholder: "https://ntfy.sh/your-topic", disabled, "aria-label": "Webhook URL" });
+  const format = el("select", { disabled, "aria-label": "New webhook format" },
+    ...formats.map(([value, label]) => el("option", { value }, label)));
+  return el("section", { class: "settings-section webhooks-section" },
+    el("div", { class: "setting-row" },
+      el("div", { class: "setting-description" }, el("label", {}, "Webhooks"),
+        el("p", {}, "The server posts here when a session needs you, finishes a turn, or exits: only the kind of event " +
+                    "and the session's name. For Telegram, use the bot's sendMessage URL with ?chat_id=. " +
+                    "URLs are secrets, shown masked once saved."))),
+    ...rows,
+    el("div", { class: "setting-row webhook-row" }, format, url,
+      el("button", { type: "button", disabled, onclick: () => {
+        if (!url.value.trim()) return;
+        saveNotifications((n) => { n.webhooks.push({ url: url.value.trim(), format: format.value }); });
+      } }, "Add")),
+    el("div", { class: "setting-row select-row" },
+      el("div", { class: "setting-description" }, el("label", {}, "Public address"),
+        el("p", {}, "Where browsers reach this server, for the link in a notification. Without it there is no link.")),
+      el("div", { class: "setting-control" },
+        el("input", { type: "url", placeholder: "https://host.example.ts.net", value: notifications.publicURL ?? "", disabled,
+                      "aria-label": "Public address",
+                      onchange: (e) => saveNotifications((n) => { n.publicURL = e.target.value.trim() || null; }) }))));
 }
 
 // MARK: policies — rules every tool call is checked against before it runs (ADR 0017)

@@ -45,7 +45,7 @@ final class SessionManagerTests: XCTestCase {
                           "AGENTMASTER_CLAUDE_PATH": root.appendingPathComponent("bin/claude").path]
                 .merging(environment) { $1 },
             modelCatalog: modelCatalog,
-            pushTransport: pushes))
+            pushTransport: pushes, webhookTransport: posts))
         managers.append(manager)
         return manager
     }
@@ -62,6 +62,19 @@ final class SessionManagerTests: XCTestCase {
     }
 
     private let pushes = Pushes()
+
+    /// Records the webhook posts the manager sends.
+    private final class Posts: WebPushTransport, @unchecked Sendable {
+        private let lock = NSLock()
+        private var all: [(url: URL, headers: [String: String], body: String)] = []
+        func post(url: URL, headers: [String: String], body: Data) async throws -> Int {
+            lock.withLock { all.append((url, headers, String(decoding: body, as: UTF8.self))) }
+            return 200
+        }
+        var list: [(url: URL, headers: [String: String], body: String)] { lock.lock(); defer { lock.unlock() }; return all }
+    }
+
+    private let posts = Posts()
 
     private var project: String { SessionManager.realPath(root.appendingPathComponent("project").path) }
 
@@ -385,6 +398,31 @@ final class SessionManagerTests: XCTestCase {
         manager.shutdown()
         managers.removeAll()
         XCTAssertEqual(try makeManager().policies.maxToolCalls, 50)
+    }
+
+    func testWebhooksHearOfRequestsAndTurnsWithoutTheirContent() throws {
+        let manager = try makeManager()
+        manager.notifications = NotificationSettings(webhooks: [.init(url: "https://ntfy.sh/secret-topic", format: "ntfy")],
+                                                     publicURL: "https://box.example")
+        XCTAssertEqual(manager.notifications.webhooks.first?.url, "https://ntfy.sh/••••", "read back masked")
+        let session = try manager.create(projectPath: project)
+        let connection = try hook(manager, session.id, permission, kind: .request)
+        XCTAssertTrue(wait { self.posts.list.count == 1 })
+        let post = try XCTUnwrap(posts.list.first)
+        XCTAssertEqual(post.url.absoluteString, "https://ntfy.sh/secret-topic")
+        XCTAssertEqual(post.headers["Click"], "https://box.example/#session=\(session.id)")
+        XCTAssertFalse(post.body.contains("swift test") || (post.headers["Title"] ?? "").contains("swift test"),
+                       "no command text leaves the server")
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1", "last_assistant_message": "secret"])
+        XCTAssertTrue(wait { self.posts.list.count == 2 })
+        XCTAssertFalse(posts.list[1].body.contains("secret"))
+        _ = try reply(connection)
+        // A masked URL sent back keeps the stored one.
+        manager.notifications = manager.notifications
+        manager.shutdown()
+        managers.removeAll()
+        let data = try String(contentsOf: root.appendingPathComponent("data/settings.json"), encoding: .utf8)
+        XCTAssertTrue(data.contains("secret-topic"), "the stored URL survived the masked round trip")
     }
 
     func testAgentsListTheModelsTheAgentsReported() throws {

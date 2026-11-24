@@ -9,7 +9,8 @@ import AgentMasterBridge
 /// The browser's API. Every /api route needs the server token, as `Authorization: Bearer <token>`
 /// or, for WebSockets (which cannot set headers from a browser), `?token=<token>`.
 ///
-///     GET    /api/agents                               agents, their settings, General settings and the policy rules
+///     GET    /api/agents                               agents, their settings, General settings, the policy rules
+///                                                      and notifications (webhook URLs masked)
 ///     PUT    /api/agents/{agent}/options/{option}      {"value": "..."|null}
 ///     PUT    /api/general                              {"restoreSessionsOnLaunch"?: bool, "aiSessionTitles"?: bool}
 ///     GET    /api/sessions                             every session
@@ -30,6 +31,8 @@ import AgentMasterBridge
 ///                                                      or {"behavior": "terminal"}: the agent's own UI decides (ADR 0017);
 ///                                                      ActionRequestJSON (409 once answered or expired)
 ///     PUT    /api/policies                             PolicySettings: replaces the policy rules
+///     PUT    /api/notifications                        NotificationSettings: webhooks and publicURL; a webhook
+///                                                      sent back with its masked URL keeps the stored one
 ///     GET    /api/push/key                             {"publicKey"}: the VAPID key for pushManager.subscribe
 ///     GET    /api/push/subscriptions                   {"subscriptions": [{"endpoint", "label", "createdAt"}]}
 ///     POST   /api/push/subscriptions                   a PushSubscription's JSON plus "label"
@@ -60,7 +63,8 @@ public enum WebServer {
 
         api.get("agents") { _, _ in
             AgentsResponse(agents: manager.agents(), restoreSessionsOnLaunch: manager.restoreSessionsOnLaunch,
-                           aiSessionTitles: manager.aiSessionTitles, policies: manager.policies, home: NSHomeDirectory())
+                           aiSessionTitles: manager.aiSessionTitles, policies: manager.policies,
+                           notifications: manager.notifications, home: NSHomeDirectory())
         }
         api.put("agents/:agent/options/:option") { request, context -> HTTPResponse.Status in
             let body = try await request.decode(as: OptionRequest.self, context: context)
@@ -78,6 +82,14 @@ public enum WebServer {
         }
         api.put("policies") { request, context -> HTTPResponse.Status in
             manager.policies = try await request.decode(as: PolicySettings.self, context: context)
+            return .noContent
+        }
+        api.put("notifications") { request, context -> HTTPResponse.Status in
+            let body = try await request.decode(as: NotificationSettings.self, context: context)
+            if let bad = body.webhooks.first(where: { !NotificationSettings.formats.contains($0.format) }) {
+                throw HTTPError(.badRequest, message: "Unknown webhook format \(bad.format); use ntfy, telegram or json.")
+            }
+            manager.notifications = body
             return .noContent
         }
 
@@ -368,6 +380,7 @@ struct AgentsResponse: ResponseEncodable {
     let restoreSessionsOnLaunch: Bool
     let aiSessionTitles: Bool
     let policies: PolicySettings
+    let notifications: NotificationSettings
     let home: String
 }
 

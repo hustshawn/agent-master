@@ -13,6 +13,7 @@ public final class ServerSettings: @unchecked Sendable {
         /// nil means on.
         var aiSessionTitles: Bool?
         var policies = PolicySettings()
+        var notifications = NotificationSettings()
 
         init() {}
 
@@ -24,6 +25,8 @@ public final class ServerSettings: @unchecked Sendable {
             restoreSessionsOnLaunch = try container.decodeIfPresent(Bool.self, forKey: .restoreSessionsOnLaunch) ?? true
             aiSessionTitles = try container.decodeIfPresent(Bool.self, forKey: .aiSessionTitles)
             policies = try container.decodeIfPresent(PolicySettings.self, forKey: .policies) ?? PolicySettings()
+            notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications)
+                ?? NotificationSettings()
         }
     }
 
@@ -84,6 +87,11 @@ public final class ServerSettings: @unchecked Sendable {
     public var policies: PolicySettings {
         get { read(\.policies) }
         set { write { $0.policies = newValue } }
+    }
+
+    public var notifications: NotificationSettings {
+        get { read(\.notifications) }
+        set { write { $0.notifications = newValue } }
     }
 
     private func read<T>(_ body: (Stored) -> T) -> T {

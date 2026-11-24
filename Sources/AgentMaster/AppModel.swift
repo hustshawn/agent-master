@@ -41,6 +41,7 @@ final class AppModel {
     @ObservationIgnored private let sessionAgents = SessionAgents()
     /// The open requests, for the cards; kept in step with `requests` on the main actor.
     private(set) var pendingRequests: [ActionRequestJSON] = []
+    @ObservationIgnored private let notifications = AppNotifications()
 
     init() {
         recentProjects = recents.paths
@@ -75,6 +76,8 @@ final class AppModel {
             }
             try server.start()
             self.server = server
+            notifications.onOpen = { id in MainActor.assumeIsolated { self.selectedId = id } }
+            notifications.start()
         } catch {
             errorMessage = "Could not start the hook server: \(error)"
         }
@@ -319,6 +322,10 @@ final class AppModel {
             case "Stop":
                 requests.expire(sessionId: session.id, reason: "turn ended")
                 titleIfNeeded(session)
+                if !isLooking(at: session.id) {
+                    notifications.post(id: "turn-\(session.id)", title: "Turn finished · \(session.displayTitle)",
+                                       body: "Ready for your next message.", sessionId: session.id)
+                }
             case "SessionEnd": requests.expire(sessionId: session.id, reason: "session ended")
             default: break
             }
@@ -329,6 +336,16 @@ final class AppModel {
 
     private func requestChanged(_ request: ActionRequestJSON) {
         pendingRequests = requests.open
+        let id = "request-\(request.id)"
+        guard request.status == "pending" else { return notifications.remove(id: id) }
+        guard !isLooking(at: request.sessionId), let session = sessions.first(where: { $0.id == request.sessionId }) else { return }
+        let heading = ["question": "Question", "policy": "Policy check"][request.kind] ?? "Approval needed"
+        notifications.post(id: id, title: "\(heading) · \(session.displayTitle)", body: request.title, sessionId: session.id)
+    }
+
+    /// The user has this session in front of them, so a notification would only interrupt.
+    private func isLooking(at sessionId: String) -> Bool {
+        NSApp.isActive && selectedId == sessionId
     }
 
     /// The card for the selected session's oldest open request.

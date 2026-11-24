@@ -52,15 +52,19 @@ public final class SessionManager: @unchecked Sendable {
         public var modelCatalog: [String: [AgentChoice]]?
         /// How push notifications reach the push services; replaced in tests.
         public var pushTransport: any WebPushTransport
+        /// How webhooks are posted, with their 5 s limit; replaced in tests.
+        public var webhookTransport: any WebPushTransport
 
         public init(dataDirectory: URL, executableURL: URL, environment: [String: String]? = nil,
                     modelCatalog: [String: [AgentChoice]]? = nil,
-                    pushTransport: any WebPushTransport = HTTPClientWebPushTransport()) {
+                    pushTransport: any WebPushTransport = HTTPClientWebPushTransport(),
+                    webhookTransport: any WebPushTransport = HTTPClientWebPushTransport(timeout: 5)) {
             self.dataDirectory = dataDirectory
             self.executableURL = executableURL
             self.environment = environment
             self.modelCatalog = modelCatalog
             self.pushTransport = pushTransport
+            self.webhookTransport = webhookTransport
         }
     }
 
@@ -76,6 +80,7 @@ public final class SessionManager: @unchecked Sendable {
     private let messages = MessageStore()
     private let attachments = AttachmentStore()
     public let push: PushNotifier
+    private let webhooks: WebhookNotifier
 
     private let lock = NSLock()
     private var sessions: [ServerSession] = []
@@ -93,6 +98,7 @@ public final class SessionManager: @unchecked Sendable {
         try paths.prepare()
         settings = ServerSettings(url: configuration.dataDirectory.appendingPathComponent("settings.json"))
         push = try PushNotifier(dataDirectory: configuration.dataDirectory, transport: configuration.pushTransport)
+        webhooks = WebhookNotifier(settings: { [settings] in settings.notifications }, transport: configuration.webhookTransport)
         paths.removeAllSessionDirectories()
         let server = HookServer(socketPath: paths.socketPath) { [weak self] message, reply in
             self?.route(message)
@@ -177,6 +183,7 @@ public final class SessionManager: @unchecked Sendable {
             // A closed session is gone from the list by now; only an agent that quit by itself is news.
             if let session = self.session(id: id) {
                 self.push.notify(PushPayload(title: "Agent exited", body: session.json.title, sessionId: id, tag: "exit-\(id)"))
+                self.webhooks.notify(WebhookEvent(kind: "exit", sessionId: id, sessionTitle: session.json.title))
             }
         }
         settings.recordProject(projectPath)
@@ -409,6 +416,13 @@ public final class SessionManager: @unchecked Sendable {
 
     public var recentProjects: [String] { settings.recentProjects }
 
+    /// Webhooks and the public address for their links. Read masked (see `NotificationSettings.masked`);
+    /// a write keeps a webhook whose URL is still masked (see `merging`).
+    public var notifications: NotificationSettings {
+        get { settings.notifications.masked }
+        set { settings.notifications = settings.notifications.merging(newValue) }
+    }
+
     /// The rules every PreToolUse is checked against; a change applies from the next tool call.
     public var policies: PolicySettings {
         get { settings.policies }
@@ -439,6 +453,7 @@ public final class SessionManager: @unchecked Sendable {
             push.notify(PushPayload(title: "Turn finished · \(json.title)",
                                     body: PushNotifier.clipped(json.state.lastMessage ?? "Ready for your next message."),
                                     sessionId: session.id, tag: "turn-\(session.id)"))
+            webhooks.notify(WebhookEvent(kind: "turn", sessionId: session.id, sessionTitle: json.title))
         case "SessionEnd": requests.expire(sessionId: session.id, reason: "session ended")
         default: break
         }
@@ -461,6 +476,8 @@ public final class SessionManager: @unchecked Sendable {
             push.notify(PushPayload(title: heading + session.json.title, body: PushNotifier.clipped(question ?? request.title),
                                     sessionId: session.id, tag: "request-\(request.id)"),
                         urgency: "high")
+            webhooks.notify(WebhookEvent(kind: request.kind == "permission" ? "approval" : request.kind,
+                                         sessionId: session.id, sessionTitle: session.json.title))
         }
     }
 

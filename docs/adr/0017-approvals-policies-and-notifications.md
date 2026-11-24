@@ -45,8 +45,9 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
 - `ActionRequestStore` 和 `ActionRequestJSON` 从 ServerKit 挪到 Bridge，Mac App 和服务端用同一个挂起表：
   先答者生效、到点自己回复、`expire` 回落、记最近 100 条结果。
 - 请求的种类在 permission、question 之外加 **policy**（见 2），带上策略给的理由（`reason`）。
-- **到点怎么回**由开表的一方定：服务端照 ADR 0013 回 deny 并打断（用户可能不在电脑前）；Mac App 回空输出，交回终端，
-  因为用户就在这台电脑上，终端里的审批框还在。策略 ASK 的到点回复见下表，两端一样。
+- **到点怎么回**由开表的一方定：服务端照 ADR 0013 等 580 s，回 deny 并打断（用户可能不在电脑前）；Mac App 的审批和提问
+  只等 30 s，然后回空输出，交回终端。等这么短，是因为 hook 挂着时 Claude Code 可能不画自己的审批框：用户没看到浮层的话，
+  终端就像卡住了（PR #19 评审 S5）。这一点还没在真机上验证，验证后可以放长。策略 ASK 两端都等 580 s，到点回复见下表。
 - **Mac App**：终端区底部的浮层。审批卡：允许、拒绝、在终端处理；提问卡：按 `questions` 渲染选项，点一个就答。
   "始终允许（写入 `permission_suggestions`）"和多选不进第一版。
 - **Web 版**：沿用已有卡片和 `POST /api/requests/{id}`。`behavior` 多一个 `"terminal"`，意思是"交给 agent 自己决定"：
@@ -75,14 +76,15 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
   |---|---|---|
   | ALLOW | 空输出 | 空输出 |
   | DENY | `permissionDecision: "deny"` + 理由 | `permissionDecision: "deny"` + 理由 |
-  | ASK，有人在卡片上点了允许 | `permissionDecision: "allow"` | 空输出（Codex 不接受不带 `updatedInput` 的 allow），之后 Codex 自己的审批照常 |
+  | ASK，有人在卡片上点了允许 | `permissionDecision: "allow"`：直接执行，跳过 Claude 自己的审批框（卡片说明照此写） | 空输出（Codex 不接受不带 `updatedInput` 的 allow），之后 Codex 自己的审批照常 |
   | ASK，拒绝 | `"deny"` + 用户填的原因 | `"deny"` + 用户填的原因 |
   | ASK，选"在终端处理"、超时或过期 | `permissionDecision: "ask"`，交给 Claude 自己的审批框 | `"deny"`，理由写明"AgentMaster 里无人回应" |
 
   Codex 的 ASK 回落只能拒绝：它不支持 `"ask"`，空输出就等于放行。策略层判成 ASK 的调用（比如 `rm -rf`）没人确认就不该跑。
   因此 policy 请求过期（新提问、一轮结束、中断、关会话）时也回这一行，不回空输出。
 - **超时**：shim 等 590 s，挂起表 580 s 到点自己按上表回复，记为 `timed out`，所以回落由 AgentMaster 决定，不会被 shim 的空输出变成放行。
-  App 退出或服务端停止时 `HookServer.stop()` 关掉挂起的连接，shim 空输出。也就是说，**AgentMaster 没在运行时策略不生效**；
+  App 退出或服务端停止时，先让所有挂起的请求过期（`expireAll`），policy 请求照上表最后一行回复（Codex 收到 deny，
+  不会被空输出放行），然后 `HookServer.stop()` 关掉连接。之后 **AgentMaster 没在运行时策略不生效**；
   策略是护栏，不是安全边界（Codex 文档也这样定位它的 hook）。
 - **第一版只有三条内置规则**，没有插件系统，也不能写脚本：
   1. **花费预算**：`askAtUSD` 和 `denyAtUSD`。数据是该会话最近一次 statusLine 的 `cost.total_cost_usd`。
@@ -90,10 +92,19 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
      statusLine 的数字如果变小了（`/clear` 或恢复会话后计数可能从头开始），把之前的值累加进 `carriedCostUSD`，
      预算按整个 AgentMaster 会话算。statusLine 比工具调用晚一点，数字最多落后一轮，设置说明里写明。
      **没有花费数据的 agent**（`reportsUsage == false`，即 Codex 和 Kiro）这条规则返回 ALLOW，Settings 里注明，不会因为没有数据就拒绝。
-  2. **危险 Bash 命令**：一组正则（不分大小写），匹配 `tool_name == "Bash"` 的 `tool_input.command`（Claude 和 Codex 都叫 `Bash`），
-     命中就 ASK，没有记忆，每次都问。默认列表：`rm -rf`/`rm -fr`（含拆开写的参数）、`git push --force`/`-f`/`--force-with-lease`、
-     `git reset --hard`、`git clean -fd`、`terraform apply|destroy`、`kubectl delete`、`DROP TABLE|DATABASE`、`mkfs`、`dd of=/dev/`、
-     `chmod -R 777`、`curl … | sh`。用户可以增删；写错的正则跳过。正则匹配命令文本，`bash -c`、变量拼接都能绕过，设置里明说。
+  2. **危险 Bash 命令**：检查 `tool_name == "Bash"` 的 `tool_input.command`（Claude 和 Codex 都叫 `Bash`），
+     命中就 ASK，没有记忆，每次都问。
+     - **内置检查不用正则**（`DangerousCommand`）：先在没有引号包住的换行、`;`、`|`、`||`、`&`、`&&` 处把命令切成简单命令，
+       再把每段分成词，去掉引号，跳过 `VAR=x` 前缀和 `sudo`、`env`、`xargs` 之类的外壳，最后按命令名判断。
+       整个过程是一遍线性扫描，几十 KB 的 heredoc 也不会拖住 accept 线程（PR #19 评审 B1：原来的正则在 90 KB 命令上回溯了 98 s）。
+     - 覆盖范围：`rm` 同时带 r 和 f（含 `-rf`、拆开写、`--recursive --force`、加引号）；`git push` 的 `-f`/`--force*`、`+refspec`、
+       `:ref`、`-d`/`--delete`、`--mirror`（合写的短参数会拆开，比如 `-uf`）；`git reset --hard`；`git clean -f`/`--force`（`-n` 除外）；
+       `terraform apply|destroy`；`kubectl delete`；`DROP TABLE|DATABASE`；`mkfs*`；`dd of=/dev/`；`chmod -R 777`（参数顺序不限）；
+       `curl|wget … | [sudo …] sh`、`bash <(curl …)`、`sh -c "$(curl …)"`；`bash -c '…'` 里的内容递归检查。
+     - **用户自己的正则**是另加的（默认为空），对每段简单命令匹配。为防写坏的正则卡死 hook 线程：编译结果缓存；
+       单段超过 4 KB 不跑，直接 ASK；全部模式最多跑 100 ms，超时也 ASK。整条命令超过 1 MB 时不检查，直接 ASK。
+       不会因为没检查完就放行。
+     - 读的仍是命令文本，`eval`、变量拼接、脚本文件都能绕过，设置里明说。
   3. **每个会话最多工具调用数**：`maxToolCalls`。每个过策略的 `PreToolUse` 计一次（AskUserQuestion 不算），跨轮次累计，会话关闭才清零。
      到上限时 ASK；用户允许后再放行 `maxToolCalls` 次。
 - **状态**按 AgentMaster 会话 id 存在内存里，跟会话一起没。恢复会话时从零开始（见待定问题）。
@@ -116,10 +127,15 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
   用 AsyncHTTPClient 发，5 s 超时，失败只记日志，不重试，不影响 hook 回复。
   - 链接是 `<publicURL>/#session=<id>`。服务端不知道自己在反向代理后面的地址，`notifications.publicURL` 写进 `settings.json`，没配就不带链接。
     **链接里不带 token**；前端 `hashchange` 认 `session=`，打开对应会话。
-  - **webhook 的内容只有**：事件种类和会话名（例如 "Approval needed · Fix the tests"）。不放命令文本、`tool_input`、问题内容、
+  - **webhook 的内容只有**：事件种类和会话名（例如 "Approval needed · Release"）。不放命令文本、`tool_input`、问题内容、
     `last_assistant_message` 和文件路径，因为 webhook 经过第三方，这些可能含密钥。Web Push 是端到端加密的，内容不变。
-  - **密钥**：webhook URL（尤其 Telegram 的 bot token）算密钥。`settings.json` 写成权限 600；
-    `GET /api/agents` 只返回打码后的 URL，`PUT /api/notifications` 里某项的 `url` 等于打码值时保留旧值。日志里不打 URL。
+  - **会话名**只取这次运行里用户改的名字或 AI 标题，否则取项目文件夹名，再不行就是 "Session"，截到 60 个字符。
+    **不用第一条提问**：界面在没有名字时会显示第一条提问，但它常带路径、日志甚至 token（PR #19 评审 B2）。
+    恢复会话时从日志读回的名字可能就是第一条提问，所以也不用。
+  - **密钥**：webhook URL（尤其 Telegram 的 bot token）算密钥。`settings.json` 先写进一个权限 600 的临时文件，再 rename 过去；
+    `GET /api/agents` 只返回打码后的 URL（`scheme://host/••••`）。每个 webhook 有稳定的 `id`：`PUT /api/notifications` 里某项的
+    `url` 还是打码值时，按 `id` 取回原来的 URL（同一个 host 的几个 webhook 打码后一样，不能按打码值匹配）。
+    `telegram` 必须用 https。日志里不打 URL。
 - Web Push 已有（0013），本 ADR 不改它。
 
 ### 备选方案
@@ -174,3 +190,9 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
   所以测试提示词改成用反引号给出完整命令。
 - 没有实测的：Codex 的 `PreToolUse` deny 输出（本机 codex 未登录），Mac App 的浮层、Policies 页和通知（Linux 上编不了 AppKit/SwiftUI，靠 macOS CI）。
 - 第 3 节的 webhook 已做；节流规则见待定问题。Web Push 早由 0013 做完，没有改动。
+- PR #19 评审后的改动：危险命令改成分词检查，用户正则加长度上限和 100 ms 截止（B1、S3）；webhook 不再用第一条提问当会话名（B2）；
+  停止前先让挂起请求过期（S1）；卡片上 Allow 的说明改正（S2）；webhook 按 `id` 合并（S4）；Mac 的审批和提问只等 30 s（S5）；
+  settings.json 从创建起就是 600（N1）；调用数规则的理由文字改正（N2 的前一半）；Telegram 只走 https（N3）；
+  Mac 在 agent 启动前登记会话（N4）；Mac 缓存解码后的策略（N5）。
+- 还没做：同一会话里几张调用数卡片，批准一张后其余的不会自动重判（N2 的后一半）；
+  Mac 的 30 s 窗口要在真机上确认 Claude Code 挂着 hook 时画不画审批框。

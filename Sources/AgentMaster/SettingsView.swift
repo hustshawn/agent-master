@@ -117,7 +117,7 @@ struct SettingsView: View {
             Toggle(isOn: Binding(get: { policies.dangerousBash.enabled },
                                  set: { value in updatePolicies { $0.dangerousBash.enabled = value } })) {
                 settingLabel("Ask before dangerous commands",
-                             note: "Shell commands matching a pattern below, such as rm -rf or a forced push. The patterns match text, so bash -c or a script gets past them: a guard rail, not a sandbox. Not for Kiro, whose hooks cannot stop a call. In Codex, a call nobody answers is denied.")
+                             note: "Built-in checks for rm -rf, forced pushes, git reset --hard, terraform apply, kubectl delete, DROP TABLE, curl piped to a shell and similar, plus your own patterns below. They read the command text, so eval, variables or a script get past them: a guard rail, not a sandbox. Not for Kiro, whose hooks cannot stop a call. In Codex, a call nobody answers is denied.")
             }
             TextEditor(text: $patternsText)
                 .font(.system(size: 11, design: .monospaced))
@@ -129,7 +129,7 @@ struct SettingsView: View {
                     }
                 }
         } footer: {
-            Text("Regular expressions, one per line, matched without regard to case. Changes apply from the next tool call.")
+            Text("Your own patterns: regular expressions, one per line, matched without regard to case against each command of the call. Changes apply from the next tool call.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

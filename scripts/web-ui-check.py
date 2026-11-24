@@ -106,7 +106,7 @@ def main():
                 page.keyboard.type("Run this exact shell command once: `rm -rf doomed`. If it is blocked, do not retry.")
                 page.keyboard.press("Enter")
                 page.wait_for_selector("#decision-area:not([hidden]) .policy-card", timeout=120000)
-                assert "dangerous-command" in page.inner_text(".policy-card"), "the card does not say why it asks"
+                assert "looks dangerous" in page.inner_text(".policy-card"), "the card does not say why it asks"
                 shot("4b-policy-card")
                 page.click("#decision-footer button:has-text('Deny')")
                 page.wait_for_selector("#decision-area", state="hidden", timeout=10000)

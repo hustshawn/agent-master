@@ -1134,8 +1134,8 @@ function policyFooter(request) {
       claude ? el("button", { type: "button", class: "policy-terminal",
                               onclick: () => decide(request.id, { behavior: "terminal" }) }, "Answer in terminal") : null),
     el("p", { class: "decision-help" }, claude
-      ? "Allow lets Claude Code's own permission rules decide; Answer in terminal shows its approval prompt."
-      : "If nobody answers, the call is denied."),
+      ? "Allow runs this call now, without Claude Code's own prompt; Answer in terminal shows that prompt."
+      : "Allow leaves the call to the agent's own approval settings. If nobody answers, the call is denied."),
   ];
 }
 
@@ -2620,16 +2620,17 @@ function policiesSection() {
               (p, v) => { p.maxToolCalls = v === null ? null : Math.floor(v); }),
     el("div", { class: "setting-row toggle-row" },
       el("div", { class: "setting-description" }, el("label", {}, "Ask before dangerous commands"),
-        el("p", {}, "Shell commands matching a pattern below, such as rm -rf or a forced push. The patterns match text, " +
-                    "so bash -c or a script gets past them: a guard rail, not a sandbox. Not for Kiro, whose hooks cannot stop a call. " +
+        el("p", {}, "Built-in checks for rm -rf, forced pushes, git reset --hard, terraform apply, kubectl delete, " +
+                    "DROP TABLE, curl piped to a shell and similar, plus your own patterns below. They read the command text, " +
+                    "so eval, variables or a script get past them: a guard rail, not a sandbox. Not for Kiro, whose hooks cannot stop a call. " +
                     "In Codex, a call nobody answers is denied.")),
       el("label", { class: "settings-switch" },
         el("input", { type: "checkbox", checked: policies.dangerousBash.enabled, disabled,
                       "aria-label": "Ask before dangerous commands",
                       onchange: (e) => savePolicies((p) => { p.dangerousBash.enabled = e.target.checked; }) }), el("span"))),
     el("div", { class: "setting-row patterns-row" },
-      el("div", { class: "setting-description" }, el("label", { for: "policy-patterns" }, "Dangerous command patterns"),
-        el("p", {}, "Regular expressions, one per line, matched without regard to case.")),
+      el("div", { class: "setting-description" }, el("label", { for: "policy-patterns" }, "Your own patterns"),
+        el("p", {}, "Regular expressions, one per line, matched without regard to case against each command of the call.")),
       el("textarea", { id: "policy-patterns", class: "policy-patterns", rows: 8, spellcheck: "false", disabled,
                        onchange: (e) => savePolicies((p) => {
                          p.dangerousBash.patterns = e.target.value.split("\n").map((l) => l.trim()).filter(Boolean);

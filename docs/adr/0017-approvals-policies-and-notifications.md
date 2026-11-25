@@ -95,6 +95,8 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
      statusLine 的数字如果变小了（`/clear` 或恢复会话后计数可能从头开始），把之前的值累加进 `carriedCostUSD`，
      预算按整个 AgentMaster 会话算。statusLine 比工具调用晚一点，数字最多落后一轮，设置说明里写明。
      **没有花费数据的 agent**（`reportsUsage == false`，即 Codex 和 Kiro）这条规则返回 ALLOW，Settings 里注明，不会因为没有数据就拒绝。
+     两个金额为空或 ≤ 0 都表示关闭：Mac 页和网页都把 0 存成关闭，`PUT /api/policies` 也把 ≤ 0 存成 `null`，
+     判定时再挡一次，所以文件里存着的 0 不会让每次调用都被拒绝。
   2. **危险 Bash 命令**：检查 `tool_name == "Bash"` 的 `tool_input.command`（Claude 和 Codex 都叫 `Bash`），
      命中就 ASK，没有记忆，每次都问。默认打开（会导致 `rm -rf node_modules` 这类日常命令也问），
      所以 policy 卡上有 **"本会话内允许"**，按规则分两种范围（跟会话一起没）：
@@ -136,13 +138,17 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
 
 ### 3. 需要你时发通知
 
-- **触发**沿用 0013 的 Web Push：请求等人（含 policy）、一轮结束、agent 自己退出。
+- **触发**沿用 0013 的 Web Push：请求等人（含 policy）、一轮结束、agent 自己退出。服务端 `shutdown()` 一开始就置 `stopping`，
+  它停掉的会话不算"自己退出"，Web Push 和 webhook 都不发（以前每次重启或升级每个会话发一条 "Agent exited"）。
 - **Mac App**：`UNUserNotificationCenter`，App 在前台且选中该会话时不发。点通知把 App 拉到前面并选中会话。
   General 设置里有两个开关：**需要你时**（审批、提问、policy 卡，默认开，带声音）和**一轮结束时**（默认关，无声音；
   开着二十多个会话时这类横幅太多，真机评审第 4 条）。审批和提问的通知在下一次 `PostToolUse`、新提问、一轮结束时撤掉。
   `UNUserNotificationCenter` 需要 bundle id，只在 `scripts/bundle.sh` 打出来的 .app 里启用，`swift run` 时跳过。通知上的允许/拒绝按钮不进第一版。
 - **服务端 webhook**：`settings.json` 里 `notifications.webhooks` 是一个列表，每项有 `url` 和 `format`（`ntfy`、`telegram`、`json`），
-  跟 Web Push 同时发。`ntfy` 把标题放在 `Title` 头、链接放在 `Click` 头、正文是 body；`telegram` POST `sendMessage`，
+  跟 Web Push 同时发。`notifications.events` 选哪几类事件发：`approval`、`question`、`policy`、`turn`、`exit`，
+  默认除 `turn` 外都发（每个会话每轮一条太吵，跟 Mac 的"一轮结束时"默认关一致）；旧的 settings.json 没有这个键时取默认，
+  网页 Settings 的 webhook 分区每类一个开关。Mac App 不发 webhook，没有这项设置。
+  `url` 必须是带 host 的 `http://` 或 `https://`，否则 `PUT /api/notifications` 回 400（以前会存下来却永远发不出去）；未知的事件种类也回 400。`ntfy` 把标题放在 `Title` 头、链接放在 `Click` 头、正文是 body；`telegram` POST `sendMessage`，
   URL 里自带 bot token，`chat_id` 写在 URL 的查询参数里；`json` 发 `{sessionId, kind, title, body, url}`。
   用 AsyncHTTPClient 发，5 s 超时，失败只记日志，不重试，不影响 hook 回复。
   - 链接是 `<publicURL>/#session=<id>`。服务端不知道自己在反向代理后面的地址，`notifications.publicURL` 写进 `settings.json`，没配就不带链接。
@@ -225,3 +231,5 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
   搜索和打印命令参数里的 SQL 不算（3）；Mac 通知两个开关，一轮结束无声音（4）；答完卡片焦点回终端（5）；
   Policies 页数字框用占位符 "Off" 和带边框的样式（6），清空或填 0 即关闭并保存（7，`PolicySettings.limit(fromText:)`）；
   卡片上命令只显示一次、按钮加大（8）。网页卡片的理由框是多行文本框，回车只换行，没有第 1 条的问题；命令只显示一次同样改了。
+- 服务端设置的第二轮评审：webhook 按 `notifications.events` 过滤，默认不发一轮结束；服务端停止时不发 "Agent exited"；
+  `PUT /api/notifications` 拒绝非 http(s) 的 URL，花费上限 ≤ 0 即关闭（API 存成 `null`，判定时也挡）。

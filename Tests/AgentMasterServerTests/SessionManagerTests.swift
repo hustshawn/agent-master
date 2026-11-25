@@ -468,6 +468,17 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertTrue(posts.list[2].body.contains("Turn finished · Release"), posts.list[2].body)
     }
 
+    /// The agents a stopping server ends did not quit by themselves: no "Agent exited" for each of them.
+    func testShuttingDownPostsNoExitForTheSessionsItStops() throws {
+        let manager = try makeManager()
+        manager.notifications = NotificationSettings(webhooks: [.init(url: "https://hooks.example/x", format: "json")])
+        let session = try manager.create(projectPath: project)
+        let process = try XCTUnwrap(manager.session(id: session.id)).process
+        manager.shutdown()
+        XCTAssertTrue(wait { process.hasExited })
+        XCTAssertFalse(wait(1) { !self.posts.list.isEmpty }, "posted: \(posts.list.map(\.body))")
+    }
+
     /// Stopping releases waiting hooks with no output, which Codex reads as "run it" (review of #19, S1).
     func testShuttingDownDeniesACodexPolicyCheckInsteadOfLettingItRun() throws {
         try script("bin/codex", "#!/bin/sh\nexec cat\n")

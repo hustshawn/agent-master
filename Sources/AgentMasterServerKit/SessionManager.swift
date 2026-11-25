@@ -87,6 +87,8 @@ public final class SessionManager: @unchecked Sendable {
     private var listeners: [UUID: @Sendable (ServerEvent) -> Void] = [:]
     /// While relaunching the journal's sessions, do not overwrite it with the partial list.
     private var restoring = false
+    /// Set by `shutdown()`: the agents it stops did not quit by themselves, so they are no news.
+    private var stopping = false
 
     public init(_ configuration: Configuration) throws {
         paths = AppPaths(supportDirectory: configuration.dataDirectory,
@@ -180,8 +182,12 @@ public final class SessionManager: @unchecked Sendable {
             guard let self else { return }
             self.requests.expire(sessionId: id, reason: "session ended")
             self.policyBook.remove(sessionId: id)
-            // A closed session is gone from the list by now; only an agent that quit by itself is news.
-            if let session = self.session(id: id) {
+            // A closed session is gone from the list by now, and a server that is stopping ends them all; only
+            // an agent that quit by itself is news.
+            self.lock.lock()
+            let stopping = self.stopping
+            self.lock.unlock()
+            if !stopping, let session = self.session(id: id) {
                 self.push.notify(PushPayload(title: "Agent exited", body: session.json.title, sessionId: id, tag: "exit-\(id)"))
                 self.webhooks.notify(WebhookEvent(kind: "exit", sessionId: id, sessionTitle: session.webhookName))
             }
@@ -352,6 +358,9 @@ public final class SessionManager: @unchecked Sendable {
     }
 
     public func shutdown() {
+        lock.lock()
+        stopping = true
+        lock.unlock()
         journalLock.lock()
         journal.freeze()
         journalLock.unlock()

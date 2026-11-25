@@ -32,19 +32,26 @@ public struct NotificationSettings: Codable, Equatable, Sendable {
     /// The address browsers reach the server at (behind a proxy the server cannot know it), for the link in a
     /// notification; without it there is no link.
     public var publicURL: String?
+    /// The kinds of event webhooks post (see `WebhookEvent.kind`). A finished turn is off by default, as on
+    /// the Mac: one post per turn per session is noise on a phone.
+    public var events: [String]
 
-    public init(webhooks: [Webhook] = [], publicURL: String? = nil) {
+    public init(webhooks: [Webhook] = [], publicURL: String? = nil, events: [String] = Self.defaultEvents) {
         self.webhooks = webhooks
         self.publicURL = publicURL
+        self.events = events
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         webhooks = try container.decodeIfPresent([Webhook].self, forKey: .webhooks) ?? []
         publicURL = try container.decodeIfPresent(String.self, forKey: .publicURL)
+        events = try container.decodeIfPresent([String].self, forKey: .events) ?? Self.defaultEvents
     }
 
     public static let formats = ["ntfy", "telegram", "json"]
+    public static let eventKinds = ["approval", "question", "policy", "turn", "exit"]
+    public static let defaultEvents = ["approval", "question", "policy", "exit"]
     static let mask = "••••"
 
     /// The scheme and host only, so Settings can show which service a webhook goes to without its secret.
@@ -58,7 +65,7 @@ public struct NotificationSettings: Codable, Equatable, Sendable {
     /// These settings as Settings shows them: webhook URLs masked.
     public var masked: NotificationSettings {
         NotificationSettings(webhooks: webhooks.map { Webhook(id: $0.id, url: Self.masked($0.url), format: $0.format) },
-                             publicURL: publicURL)
+                             publicURL: publicURL, events: events)
     }
 
     /// `incoming` from Settings, where a webhook whose URL is still the masked form keeps the stored URL with
@@ -71,7 +78,8 @@ public struct NotificationSettings: Codable, Equatable, Sendable {
             return Webhook(id: old.id, url: old.url, format: hook.format)
         }
         let publicURL = incoming.publicURL?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return NotificationSettings(webhooks: kept, publicURL: publicURL?.isEmpty == false ? publicURL : nil)
+        return NotificationSettings(webhooks: kept, publicURL: publicURL?.isEmpty == false ? publicURL : nil,
+                                    events: incoming.events)
     }
 }
 
@@ -109,7 +117,7 @@ final class WebhookNotifier: @unchecked Sendable {
 
     func notify(_ event: WebhookEvent) {
         let current = settings()
-        guard !current.webhooks.isEmpty else { return }
+        guard !current.webhooks.isEmpty, current.events.contains(event.kind) else { return }
         let requests = current.webhooks.compactMap { Self.request(for: event, webhook: $0, publicURL: current.publicURL) }
         let transport = transport, logger = logger
         Task {

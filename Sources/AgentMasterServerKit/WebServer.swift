@@ -33,8 +33,9 @@ import AgentMasterBridge
 ///                                                      command (or the limit) asking again in that session;
 ///                                                      ActionRequestJSON (409 once answered or expired)
 ///     PUT    /api/policies                             PolicySettings: replaces the policy rules
-///     PUT    /api/notifications                        NotificationSettings: webhooks and publicURL; a webhook
-///                                                      sent back with its masked URL keeps the stored one
+///     PUT    /api/notifications                        NotificationSettings: webhooks, publicURL and events (the
+///                                                      kinds webhooks post); a webhook sent back with its masked
+///                                                      URL keeps the stored one
 ///     GET    /api/push/key                             {"publicKey"}: the VAPID key for pushManager.subscribe
 ///     GET    /api/push/subscriptions                   {"subscriptions": [{"endpoint", "label", "createdAt"}]}
 ///     POST   /api/push/subscriptions                   a PushSubscription's JSON plus "label"
@@ -90,6 +91,9 @@ public enum WebServer {
             let body = try await request.decode(as: NotificationSettings.self, context: context)
             if let bad = body.webhooks.first(where: { !NotificationSettings.formats.contains($0.format) }) {
                 throw HTTPError(.badRequest, message: "Unknown webhook format \(bad.format); use ntfy, telegram or json.")
+            }
+            if let bad = body.events.first(where: { !NotificationSettings.eventKinds.contains($0) }) {
+                throw HTTPError(.badRequest, message: "Unknown webhook event \(bad); use approval, question, policy, turn or exit.")
             }
             if body.webhooks.contains(where: { $0.format == "telegram" && $0.url.lowercased().hasPrefix("http://") }) {
                 throw HTTPError(.badRequest, message: "A Telegram webhook carries the bot token, so it must use https.")

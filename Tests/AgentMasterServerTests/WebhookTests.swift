@@ -87,5 +87,14 @@ final class WebhookTests: XCTestCase {
 
     func testOlderSettingsDecodeWithoutTheKeys() throws {
         XCTAssertEqual(try JSONDecoder().decode(NotificationSettings.self, from: Data("{}".utf8)), NotificationSettings())
+        let old = try JSONDecoder().decode(NotificationSettings.self, from: Data(
+            #"{"webhooks":[{"url":"https://ntfy.sh/x","format":"ntfy"}]}"#.utf8))
+        XCTAssertEqual(old.events, ["approval", "question", "policy", "exit"], "a finished turn stays quiet")
+    }
+
+    func testTheEventChoiceSurvivesMaskingAndMerging() {
+        let stored = NotificationSettings(webhooks: [.init(id: "a", url: "https://ntfy.sh/x", format: "ntfy")], events: ["exit"])
+        XCTAssertEqual(stored.masked.events, ["exit"])
+        XCTAssertEqual(stored.merging(NotificationSettings(webhooks: stored.masked.webhooks, events: ["turn"])).events, ["turn"])
     }
 }

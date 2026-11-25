@@ -403,7 +403,8 @@ final class SessionManagerTests: XCTestCase {
     func testWebhooksHearOfRequestsAndTurnsWithoutTheirContent() throws {
         let manager = try makeManager()
         manager.notifications = NotificationSettings(webhooks: [.init(url: "https://ntfy.sh/secret-topic", format: "ntfy")],
-                                                     publicURL: "https://box.example")
+                                                     publicURL: "https://box.example",
+                                                     events: NotificationSettings.eventKinds)
         XCTAssertEqual(manager.notifications.webhooks.first?.url, "https://ntfy.sh/••••", "read back masked")
         let session = try manager.create(projectPath: project)
         let connection = try hook(manager, session.id, permission, kind: .request)
@@ -425,10 +426,27 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertTrue(data.contains("secret-topic"), "the stored URL survived the masked round trip")
     }
 
+    /// By default a finished turn posts nothing; the next event of a kind that is on does.
+    func testWebhooksPostOnlyTheChosenEvents() throws {
+        let manager = try makeManager()
+        manager.notifications = NotificationSettings(webhooks: [.init(url: "https://hooks.example/x", format: "json")])
+        let session = try manager.create(projectPath: project)
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1"])
+        let connection = try hook(manager, session.id, permission, kind: .request)
+        XCTAssertTrue(wait { self.posts.list.count == 1 })
+        XCTAssertTrue(posts.list[0].body.contains(#""kind":"approval""#), posts.list[0].body)
+        manager.notifications = NotificationSettings(webhooks: manager.notifications.webhooks, events: ["turn"])
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1"])
+        XCTAssertTrue(wait { self.posts.list.count == 2 })
+        XCTAssertTrue(posts.list[1].body.contains(#""kind":"turn""#), posts.list[1].body)
+        _ = try reply(connection)   // the turn's end expired the approval
+    }
+
     /// The first prompt can hold secrets; webhooks go through third parties (review of #19, B2).
     func testWebhooksNameASessionWithoutItsFirstPrompt() throws {
         let manager = try makeManager()
-        manager.notifications = NotificationSettings(webhooks: [.init(url: "https://hooks.example/x", format: "json")])
+        manager.notifications = NotificationSettings(webhooks: [.init(url: "https://hooks.example/x", format: "json")],
+                                                     events: NotificationSettings.eventKinds)
         let session = try manager.create(projectPath: project)
         try hook(manager, session.id, ["hook_event_name": "UserPromptSubmit", "session_id": "c1",
                                        "prompt": "deploy with token sk-secret-123 please"])

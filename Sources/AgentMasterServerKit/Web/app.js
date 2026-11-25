@@ -2541,6 +2541,11 @@ function generalPage() {
 
 // MARK: webhooks — the server also posts to ntfy, Telegram or any URL when a session needs you (ADR 0017)
 
+// The kinds the server's NotificationSettings.events takes; a finished turn is off by default.
+const WEBHOOK_EVENTS = [["approval", "Post when an approval is needed"], ["question", "Post when the agent asks a question"],
+                        ["policy", "Post when a policy check asks"], ["turn", "Post when a turn finishes"],
+                        ["exit", "Post when an agent exits"]];
+
 async function saveNotifications(change) {
   const notifications = structuredClone(state.notifications);
   change(notifications);
@@ -2571,7 +2576,7 @@ function webhooksSection() {
   return el("section", { class: "settings-section webhooks-section" },
     el("div", { class: "setting-row" },
       el("div", { class: "setting-description" }, el("label", {}, "Webhooks"),
-        el("p", {}, "The server posts here when a session needs you, finishes a turn, or exits: only the kind of event " +
+        el("p", {}, "The server posts here for the events chosen below: only the kind of event " +
                     "and the session's name. For Telegram, use the bot's sendMessage URL with ?chat_id=. " +
                     "URLs are secrets, shown masked once saved."))),
     ...rows,
@@ -2580,6 +2585,14 @@ function webhooksSection() {
         if (!url.value.trim()) return;
         saveNotifications((n) => { n.webhooks.push({ url: url.value.trim(), format: format.value }); });
       } }, "Add")),
+    ...WEBHOOK_EVENTS.map(([kind, label]) =>
+      el("div", { class: "setting-row toggle-row" },
+        el("div", { class: "setting-description" }, el("label", {}, label)),
+        el("label", { class: "settings-switch" },
+          el("input", { type: "checkbox", checked: notifications.events.includes(kind), disabled, "aria-label": label,
+            onchange: (e) => saveNotifications((n) => {
+              n.events = n.events.filter((k) => k !== kind).concat(e.target.checked ? [kind] : []);
+            }) }), el("span")))),
     el("div", { class: "setting-row select-row" },
       el("div", { class: "setting-description" }, el("label", {}, "Public address"),
         el("p", {}, "Where browsers reach this server, for the link in a notification. Without it there is no link.")),

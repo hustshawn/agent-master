@@ -49,21 +49,26 @@ public struct DecisionCardModel: Identifiable, Equatable {
     }
 }
 
-/// An approval, a question or a policy check, answered here or handed to the terminal. While it waits,
-/// the agent's own prompt does not show in the terminal, so "Answer in terminal" stays one click away.
+/// An approval, a question or a policy check, answered here or handed to the terminal. While a policy check
+/// waits, the agent's own prompt does not show in the terminal, so "Answer in terminal" stays one click away.
+/// No button takes Return: Return in the reason field denies, so typing a reason can never allow the call.
 public struct DecisionOverlay: View {
     let card: DecisionCardModel
     let onAllow: () -> Void
+    /// "Allow for this session" on a policy check: the rule that asked stops asking in this session.
+    let onAllowForSession: () -> Void
     let onDeny: (String) -> Void
     let onAnswer: ([String: String]) -> Void
     let onTerminal: () -> Void
     @State private var reason = ""
     @State private var chosen: [String: String] = [:]
 
-    public init(card: DecisionCardModel, onAllow: @escaping () -> Void, onDeny: @escaping (String) -> Void,
-                onAnswer: @escaping ([String: String]) -> Void, onTerminal: @escaping () -> Void) {
+    public init(card: DecisionCardModel, onAllow: @escaping () -> Void, onAllowForSession: @escaping () -> Void,
+                onDeny: @escaping (String) -> Void, onAnswer: @escaping ([String: String]) -> Void,
+                onTerminal: @escaping () -> Void) {
         self.card = card
         self.onAllow = onAllow
+        self.onAllowForSession = onAllowForSession
         self.onDeny = onDeny
         self.onAnswer = onAnswer
         self.onTerminal = onTerminal
@@ -90,21 +95,33 @@ public struct DecisionOverlay: View {
                     }
                 }
             } else {
-                Text(card.title).font(MuseFont.body.bold()).foregroundStyle(Palette.text)
                 if let reason = card.reason { Text(reason).font(MuseFont.small).foregroundStyle(Palette.warning) }
-                Text(card.detail).font(MuseFont.small).foregroundStyle(Palette.muted).lineLimit(4).textSelection(.enabled)
+                // The command once: a shell call's title ("$ rm -rf build") already is the command.
+                if card.detail.isEmpty || card.title.contains(card.detail) {
+                    Text(card.title).font(.system(size: 12, design: .monospaced)).foregroundStyle(Palette.text)
+                        .lineLimit(4).textSelection(.enabled)
+                } else {
+                    Text(card.title).font(MuseFont.body.bold()).foregroundStyle(Palette.text)
+                    Text(card.detail).font(MuseFont.small).foregroundStyle(Palette.muted).lineLimit(4).textSelection(.enabled)
+                }
                 TextField("Reason, if you deny (optional)", text: $reason).textFieldStyle(.roundedBorder)
+                    .onSubmit(deny)
             }
             HStack {
                 if card.kind != .question {
-                    Button("Allow", action: onAllow).keyboardShortcut(.defaultAction)
-                    Button("Deny") { onDeny(reason.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                    Button("Allow", action: onAllow)
+                    if card.kind == .policy {
+                        Button("Allow for this session", action: onAllowForSession)
+                            .help("The rule that asked stops asking in this session.")
+                    }
+                    Button("Deny", action: deny)
                 }
                 Spacer()
                 if card.kind != .policy || card.canHandBack {
                     Button("Answer in terminal", action: onTerminal)
                 }
             }
+            .controlSize(.large)
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 10).fill(Palette.selection))
@@ -118,6 +135,10 @@ public struct DecisionOverlay: View {
         case .question: return "Needs your answer"
         case .policy: return "Policy check"
         }
+    }
+
+    private func deny() {
+        onDeny(reason.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private func choose(_ label: String, for text: String) {

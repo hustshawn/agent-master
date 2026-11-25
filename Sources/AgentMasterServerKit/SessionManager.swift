@@ -286,9 +286,10 @@ public final class SessionManager: @unchecked Sendable {
 
     public var messageReceipts: [MessageReceiptJSON] { messages.all }
 
+    /// `forSession`: "Allow for this session" on a policy check.
     @discardableResult
-    public func answer(requestId: String, decision: RemoteDecision) throws -> ActionRequestJSON {
-        try requests.answer(requestId, decision: decision)
+    public func answer(requestId: String, decision: RemoteDecision, forSession: Bool = false) throws -> ActionRequestJSON {
+        try requests.answer(requestId, decision: decision, forSession: forSession)
     }
 
     /// Types `text` into the session as a prompt, only while the agent waits for one. A repeated `messageId`

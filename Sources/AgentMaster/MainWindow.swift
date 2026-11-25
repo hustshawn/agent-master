@@ -35,6 +35,7 @@ struct MainWindow: View {
                                 DecisionOverlay(
                                     card: card,
                                     onAllow: { model.answer(card.id, .allow) },
+                                    onAllowForSession: { model.answer(card.id, .allow, forSession: true) },
                                     onDeny: { model.answer(card.id, .deny(message: $0.isEmpty ? "The user denied this." : $0,
                                                                           interrupt: false)) },
                                     onAnswer: { model.answer(card.id, .answer($0)) },

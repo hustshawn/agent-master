@@ -109,6 +109,43 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(check("rm -rf x", state: &asked).verdict, .ask, "no memory: every dangerous command asks")
     }
 
+    /// Review of #19 on a Mac, item 3: SQL that a command only searches for or prints is data.
+    func testSQLInSearchAndPrintArgumentsDoesNotAsk() {
+        for command in [
+            #"grep -r "drop table" ."#, #"rg -i 'DROP TABLE' src"#, "echo drop table users", "printf 'drop database x'",
+            "cat migrations/drop_table.sql", #"git log --grep "drop table""#, #"git grep -n "DROP TABLE""#,
+            #"grep -r "drop table" . | head -5"#, #"echo "drop table t" | grep drop"#,
+        ] {
+            XCTAssertEqual(verdict(command), .allow, command)
+        }
+        for command in [
+            #"echo "drop table t" | psql"#, "cat drop.sql | mysql -e 'drop table t'", "psql -c 'drop table t'",
+            "mysql <<'EOF'\nDROP TABLE t;\nEOF", "rm -rf node_modules", "rm -rf build",
+        ] {
+            XCTAssertEqual(verdict(command), .ask, command)
+        }
+    }
+
+    func testAllowForTheSessionStopsOnlyThoseRulesAsking() {
+        let settings = PolicySettings(cost: .init(denyAtUSD: 5))
+        var state = PolicyState()
+        let first = check("rm -rf node_modules", settings, state: &state)
+        PolicyReducer.approve(first.askingRules, forSession: true, settings: settings, state: &state)
+        XCTAssertEqual(check("rm -rf build", settings, state: &state).verdict, .allow)
+        XCTAssertEqual(check("git push --force", settings, state: &state).verdict, .allow)
+        PolicyReducer.observeCost(6, in: &state)
+        XCTAssertEqual(check("rm -rf build", settings, state: &state).verdict, .deny, "a limit that denies still denies")
+    }
+
+    func testALimitTypedBlankOrZeroIsOff() {
+        XCTAssertEqual(PolicySettings.limit(fromText: ""), .some(nil))
+        XCTAssertEqual(PolicySettings.limit(fromText: " 0 "), .some(nil))
+        XCTAssertEqual(PolicySettings.limit(fromText: "5"), .some(5))
+        XCTAssertEqual(PolicySettings.limit(fromText: "2.5"), .some(2.5))
+        XCTAssertNil(PolicySettings.limit(fromText: "abc"), "not a number yet: the saved limit stays")
+        XCTAssertNil(PolicySettings.limit(fromText: "-1"))
+    }
+
     func testTheCallLimitAsksThenLetsAsManyMoreThrough() {
         let settings = PolicySettings(dangerousBash: .init(enabled: false), maxToolCalls: 2)
         var state = PolicyState()

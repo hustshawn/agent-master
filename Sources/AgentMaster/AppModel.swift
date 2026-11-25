@@ -33,11 +33,10 @@ final class AppModel {
     @ObservationIgnored private var server: HookServer?
     @ObservationIgnored private let newSessionPanel = NewSessionPanel()
     @ObservationIgnored private var environmentTask: Task<[String: String], Never>?
-    /// Approvals, questions and policy checks waiting on a card. Unanswered ones go back to the terminal,
-    /// since the user is at this Mac (the server denies instead; ADR 0013, 0017). Approvals and questions wait
-    /// only 30 s: Claude Code may not draw its own prompt while the hook waits, and a user who does not see the
-    /// card would see a stuck terminal. shortcut: untested on a real Mac; make it longer once checked there.
-    @ObservationIgnored let requests = ActionRequestStore(approvalTimeout: 30, timeoutDecision: nil)
+    /// Policy checks waiting on a card; unanswered ones go back to the terminal, since the user is at this Mac
+    /// (ADR 0017). Approvals and questions get no card: Claude Code draws its own prompt in the terminal while
+    /// the hook waits, so they are answered at once and only post a notification.
+    @ObservationIgnored let requests = ActionRequestStore(timeoutDecision: nil)
     @ObservationIgnored private let policyBook = PolicyBook()
     /// Which agent each session runs, for the hook thread, which cannot read `sessions`.
     @ObservationIgnored private let sessionAgents = SessionAgents()
@@ -74,7 +73,7 @@ final class AppModel {
                 guard let agent = sessionAgents[message.sessionId] else { return reply(nil) }
                 HookRequestRouter.route(sessionId: message.sessionId, payload: message.payload, reply: reply, agent: agent,
                                         settings: GeneralSettings.policies(.standard), policies: policyBook,
-                                        requests: requests, remote: true) { _ in }
+                                        requests: requests, remote: false) { _ in }
             }
             try server.start()
             self.server = server
@@ -321,15 +320,28 @@ final class AppModel {
         case .event, .request:
             session.receive(hook: message.payload)
             let payload = AgentRegistry.agent(id: session.agentId)?.hookDialect.normalize(message.payload)
+            let event = payload?["hook_event_name"]?.stringValue
+            let needsYouId = "needs-\(session.id)"
+            // An approval or a question is answered in the terminal (see `requests`); only tell the user.
+            if event == "PermissionRequest" || (event == "PreToolUse" && payload?["tool_name"]?.stringValue == "AskUserQuestion") {
+                let input = payload?["tool_input"] ?? .null
+                let body = event == "PermissionRequest"
+                    ? ToolClassifier.kind(name: payload?["tool_name"]?.stringValue ?? "tool", input: input).title
+                    : input["questions"]?[0]?["question"]?.stringValue ?? "The agent has a question."
+                notifyNeedsYou(id: needsYouId, heading: event == "PermissionRequest" ? "Approval needed" : "Question",
+                               body: body, session: session)
+            } else if ["PostToolUse", "UserPromptSubmit", "Stop", "SessionEnd"].contains(event) {
+                notifications.remove(id: needsYouId)
+            }
             // No request outlives its turn: a hook still waiting then was cancelled, or answered in the terminal.
-            switch payload?["hook_event_name"]?.stringValue {
+            switch event {
             case "UserPromptSubmit": requests.expire(sessionId: session.id, reason: "answered in the terminal")
             case "Stop":
                 requests.expire(sessionId: session.id, reason: "turn ended")
                 titleIfNeeded(session)
-                if !isLooking(at: session.id) {
+                if GeneralSettings.notifyTurnFinished(.standard), !isLooking(at: session.id) {
                     notifications.post(id: "turn-\(session.id)", title: "Turn finished · \(session.displayTitle)",
-                                       body: "Ready for your next message.", sessionId: session.id)
+                                       body: "Ready for your next message.", sessionId: session.id, sound: false)
                 }
             case "SessionEnd": requests.expire(sessionId: session.id, reason: "session ended")
             default: break
@@ -343,9 +355,14 @@ final class AppModel {
         pendingRequests = requests.open
         let id = "request-\(request.id)"
         guard request.status == "pending" else { return notifications.remove(id: id) }
-        guard !isLooking(at: request.sessionId), let session = sessions.first(where: { $0.id == request.sessionId }) else { return }
-        let heading = ["question": "Question", "policy": "Policy check"][request.kind] ?? "Approval needed"
-        notifications.post(id: id, title: "\(heading) · \(session.displayTitle)", body: request.title, sessionId: session.id)
+        guard let session = sessions.first(where: { $0.id == request.sessionId }) else { return }
+        notifyNeedsYou(id: id, heading: "Policy check", body: request.title, session: session)
+    }
+
+    /// Unless turned off in General settings, or the user is looking at the session.
+    private func notifyNeedsYou(id: String, heading: String, body: String, session: SessionController) {
+        guard GeneralSettings.notifyNeedsYou(.standard), !isLooking(at: session.id) else { return }
+        notifications.post(id: id, title: "\(heading) · \(session.displayTitle)", body: body, sessionId: session.id)
     }
 
     /// The user has this session in front of them, so a notification would only interrupt.
@@ -372,8 +389,12 @@ final class AppModel {
     }
 
     /// A card's answer. One answered elsewhere first (in the terminal, or after it timed out) is just gone.
-    func answer(_ requestId: String, _ decision: RemoteDecision) {
-        _ = try? requests.answer(requestId, decision: decision)
+    /// Then the keyboard goes back to the session's terminal, so the user can type on without a click.
+    func answer(_ requestId: String, _ decision: RemoteDecision, forSession: Bool = false) {
+        let sessionId = pendingRequests.first { $0.id == requestId }?.sessionId
+        _ = try? requests.answer(requestId, decision: decision, forSession: forSession)
+        guard let view = sessions.first(where: { $0.id == sessionId })?.terminal.view else { return }
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
     }
 
     /// After a turn ends: once per session, a short AI title from its first prompt and the reply, unless it has a name.

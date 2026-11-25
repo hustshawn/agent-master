@@ -29,6 +29,8 @@ import AgentMasterBridge
 ///     GET    /api/requests                             open and recently resolved approvals and questions
 ///     POST   /api/requests/{id}                        {"behavior": "allow"|"deny", "message"?} or {"answers": {question: label}},
 ///                                                      or {"behavior": "terminal"}: the agent's own UI decides (ADR 0017);
+///                                                      "scope": "session" with allow stops a policy check's rules
+///                                                      asking again in that session;
 ///                                                      ActionRequestJSON (409 once answered or expired)
 ///     PUT    /api/policies                             PolicySettings: replaces the policy rules
 ///     PUT    /api/notifications                        NotificationSettings: webhooks and publicURL; a webhook
@@ -183,7 +185,10 @@ public enum WebServer {
             } else {
                 throw HTTPError(.badRequest, message: "Send behavior allow, deny or terminal, or answers.")
             }
-            return try mapErrors { try manager.answer(requestId: context.parameters.require("id"), decision: decision) }
+            return try mapErrors {
+                try manager.answer(requestId: context.parameters.require("id"), decision: decision,
+                                   forSession: decision == .allow && body.scope == "session")
+            }
         }
 
         api.get("push/key") { _, _ in PushKeyResponse(publicKey: manager.push.publicKey) }
@@ -433,6 +438,8 @@ struct MessageRequest: Decodable {
 
 struct AnswerRequest: Decodable {
     let behavior: String?
+    /// "session": with allow, for the rest of the session.
+    let scope: String?
     let message: String?
     let answers: [String: String]?
 }

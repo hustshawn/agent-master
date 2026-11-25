@@ -16,7 +16,11 @@ public enum DangerousCommand {
             let command = commandWords(words(segment.text))
             guard let name = command.first.map(baseName) else { continue }
             let args = Array(command.dropFirst())
-            if let found = check(name: name, args: args, raw: segment.text) { return found }
+            // `grep -r "drop table" .` only searches for the words; `echo "drop table t" | psql` runs them.
+            let next = segment.pipesToNext && index + 1 < pipeline.count
+                ? commandWords(words(pipeline[index + 1].text)).first.map(baseName) : nil
+            let sqlIsData = textCommands.contains(name) && (next.map(textCommands.contains) ?? true)
+            if let found = check(name: name, args: args, raw: segment.text, sqlIsData: sqlIsData) { return found }
             // curl … | sh: the next command in the pipe is a shell.
             if ["curl", "wget"].contains(name), segment.pipesToNext, index + 1 < pipeline.count,
                let next = commandWords(words(pipeline[index + 1].text)).first.map(baseName), shells.contains(next) {
@@ -33,7 +37,12 @@ public enum DangerousCommand {
 
     static let shells: Set<String> = ["sh", "bash", "zsh", "dash", "ksh", "fish"]
 
-    private static func check(name: String, args: [String], raw: String) -> String? {
+    /// Commands that search or print text, so SQL in their arguments is data, unless piped into something else.
+    /// (git is checked by its subcommand, so `git log --grep "drop table"` never reaches the SQL check.)
+    static let textCommands: Set<String> = ["grep", "egrep", "fgrep", "rg", "ag", "ack", "echo", "printf", "cat",
+                                            "head", "tail", "less", "more", "wc", "sort", "uniq"]
+
+    private static func check(name: String, args: [String], raw: String, sqlIsData: Bool) -> String? {
         let flags = Flags(args)
         switch name {
         case "rm":
@@ -60,7 +69,7 @@ public enum DangerousCommand {
                 return "runs a downloaded script with \(name)"
             }
         }
-        if containsDrop(raw) { return "DROP TABLE or DATABASE" }
+        if !sqlIsData, containsDrop(raw) { return "DROP TABLE or DATABASE" }
         return nil
     }
 

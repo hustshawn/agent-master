@@ -15,6 +15,22 @@ public enum GeneralSettings {
         defaults.object(forKey: aiSessionTitlesKey) as? Bool ?? true
     }
 
+    /// Mac notifications (ADR 0017) when a session you are not looking at needs you: an approval, a question
+    /// or a policy check. On by default.
+    public static let notifyNeedsYouKey = "notifyNeedsYou"
+
+    public static func notifyNeedsYou(_ defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: notifyNeedsYouKey) as? Bool ?? true
+    }
+
+    /// Mac notifications when such a session finishes a turn, without sound. Off by default: with many
+    /// sessions they come often.
+    public static let notifyTurnFinishedKey = "notifyTurnFinished"
+
+    public static func notifyTurnFinished(_ defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: notifyTurnFinishedKey) as? Bool ?? false
+    }
+
     /// The policy rules (ADR 0017), as the JSON the server keeps under the same key in settings.json.
     public static let policiesKey = "policies"
 

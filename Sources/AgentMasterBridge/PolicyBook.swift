@@ -29,8 +29,11 @@ public final class PolicyBook: @unchecked Sendable {
         sync { PolicyReducer.observeCost(cost, in: &$0[sessionId, default: PolicyState()]) }
     }
 
-    public func approve(_ rules: [PolicyRule], sessionId: String, settings: PolicySettings) {
-        sync { PolicyReducer.approve(rules, settings: settings, state: &$0[sessionId, default: PolicyState()]) }
+    public func approve(_ rules: [PolicyRule], forSession: Bool = false, sessionId: String, settings: PolicySettings) {
+        sync {
+            PolicyReducer.approve(rules, forSession: forSession, settings: settings,
+                                  state: &$0[sessionId, default: PolicyState()])
+        }
     }
 
     public func remove(sessionId: String) {
@@ -52,7 +55,8 @@ public final class PolicyBook: @unchecked Sendable {
 /// which answer it, ask the user or let it through; anything else that `remote` accepts waits for the user.
 public enum HookRequestRouter {
     /// - Parameters:
-    ///   - remote: whether approvals and questions wait for an answer in AgentMaster.
+    ///   - remote: whether approvals and questions wait for an answer in AgentMaster. The Mac app passes false:
+    ///     Claude Code draws its own prompt in the terminal while the hook waits, so a card only repeated it.
     ///   - opened: called with each request a card should show.
     public static func route(sessionId: String, payload: JSONValue, reply: @escaping (String?) -> Void,
                              agent: any AgentKind, settings: PolicySettings, policies: PolicyBook,
@@ -70,7 +74,9 @@ public enum HookRequestRouter {
                 let rules = check.askingRules
                 if let request = requests.openPolicy(
                     sessionId: sessionId, agent: agent, payload: payload, reason: check.reason,
-                    onAllow: { policies.approve(rules, sessionId: sessionId, settings: settings) },
+                    onAllow: { forSession in
+                        policies.approve(rules, forSession: forSession, sessionId: sessionId, settings: settings)
+                    },
                     reply: reply) {
                     opened(request)
                 } else {

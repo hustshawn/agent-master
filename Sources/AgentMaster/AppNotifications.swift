@@ -1,7 +1,8 @@
 import AppKit
 import UserNotifications
 
-/// Tells the user when a session needs them (ADR 0017): a request waits on a card, or a turn ended.
+/// Tells the user when a session needs them (ADR 0017): an approval or a question waits in its terminal, a
+/// policy check on a card, or (if turned on in General settings) a turn ended.
 /// UNUserNotificationCenter needs a bundle id, so this is on only in the .app `scripts/bundle.sh` builds,
 /// not under `swift run`. A click brings the app forward with that session selected.
 final class AppNotifications: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
@@ -17,12 +18,12 @@ final class AppNotifications: NSObject, UNUserNotificationCenterDelegate, @unche
     }
 
     /// `id` replaces an earlier notification with the same id (one per request, one per session's turn).
-    func post(id: String, title: String, body: String, sessionId: String) {
+    func post(id: String, title: String, body: String, sessionId: String, sound: Bool = true) {
         guard enabled else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        content.sound = sound ? .default : nil
         content.userInfo = ["sessionId": sessionId]
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }

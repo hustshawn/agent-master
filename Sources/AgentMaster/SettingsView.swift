@@ -9,6 +9,8 @@ struct SettingsView: View {
     @State private var preferences: [String: AgentPreferences] = [:]
     @AppStorage(GeneralSettings.restoreSessionsOnLaunchKey) private var restoreSessions = true
     @AppStorage(GeneralSettings.aiSessionTitlesKey) private var aiSessionTitles = true
+    @AppStorage(GeneralSettings.notifyNeedsYouKey) private var notifyNeedsYou = true
+    @AppStorage(GeneralSettings.notifyTurnFinishedKey) private var notifyTurnFinished = false
     @AppStorage(HotkeyMap.storageKey) private var hotkeys = HotkeyMap()
     @State private var switchProblem: String?
     @State private var policies = GeneralSettings.policies(.standard)
@@ -49,6 +51,15 @@ struct SettingsView: View {
                         Text("After a session's first turn, Claude Haiku names it from the prompt and the reply. Needs Claude Code.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                }
+            }
+            Section("Notifications") {
+                Toggle(isOn: $notifyNeedsYou) {
+                    settingLabel("When a session needs you",
+                                 note: "An approval, a question or a policy check in a session you are not looking at.")
+                }
+                Toggle(isOn: $notifyTurnFinished) {
+                    settingLabel("When a turn finishes", note: "In a session you are not looking at. Without sound.")
                 }
             }
         } policies: {
@@ -103,14 +114,11 @@ struct SettingsView: View {
             policyNumber("Deny when a session costs (USD)", note: "Every tool call is denied from here on.",
                          value: \.cost.denyAtUSD)
             LabeledContent {
-                // Commits on Return or leaving the field; blank turns the rule off.
-                TextField("Off", value: Binding(
-                    get: { policies.maxToolCalls },
-                    set: { value in updatePolicies { $0.maxToolCalls = value.flatMap { $0 > 0 ? $0 : nil } } }),
-                          format: .number)
-                    .frame(width: 90).multilineTextAlignment(.trailing)
+                PolicyNumberField(value: policies.maxToolCalls.map(Double.init)) { value in
+                    updatePolicies { $0.maxToolCalls = value.map { Int($0) }.flatMap { $0 > 0 ? $0 : nil } }
+                }
             } label: {
-                settingLabel("Ask after tool calls", note: "Per session; allowing lets as many more through.")
+                settingLabel("Ask after tool calls", note: "Per session; allowing lets as many more through. Blank or 0 is off.")
             }
         }
         Section {
@@ -146,14 +154,12 @@ struct SettingsView: View {
         }
     }
 
-    /// A dollar amount; blank turns the rule off.
+    /// A dollar amount; blank or 0 turns the rule off.
     private func policyNumber(_ title: String, note: String, value: WritableKeyPath<PolicySettings, Double?>) -> some View {
         LabeledContent {
-            TextField("Off", value: Binding(
-                get: { policies[keyPath: value] },
-                set: { amount in updatePolicies { $0[keyPath: value] = amount.flatMap { $0 >= 0 ? $0 : nil } } }),
-                      format: .number)
-                .frame(width: 90).multilineTextAlignment(.trailing)
+            PolicyNumberField(value: policies[keyPath: value]) { amount in
+                updatePolicies { $0[keyPath: value] = amount }
+            }
         } label: {
             settingLabel(title, note: note)
         }
@@ -167,5 +173,29 @@ struct SettingsView: View {
     private static func abbreviatingHome(_ path: String) -> String {
         let home = NSHomeDirectory()
         return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+    }
+}
+
+/// A limit on the Policies page, saved as it is typed: blank or 0 turns it off. The text is the field's own,
+/// so a value it cannot read yet ("1.") stays as typed instead of snapping back to the saved number.
+/// A placeholder rather than a title, since a grouped Form shows a TextField's title as a label beside it.
+private struct PolicyNumberField: View {
+    let onChange: (Double?) -> Void
+    @State private var text: String
+
+    init(value: Double?, onChange: @escaping (Double?) -> Void) {
+        self.onChange = onChange
+        _text = State(initialValue: value.map { $0.formatted(.number.grouping(.never)) } ?? "")
+    }
+
+    var body: some View {
+        TextField("", text: $text, prompt: Text("Off"))
+            .labelsHidden()
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 90)
+            .multilineTextAlignment(.trailing)
+            .onChange(of: text) { _, text in
+                if let limit = PolicySettings.limit(fromText: text) { onChange(limit) }
+            }
     }
 }

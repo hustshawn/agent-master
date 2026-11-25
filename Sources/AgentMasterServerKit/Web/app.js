@@ -1103,8 +1103,7 @@ async function submitAnswers(request, questions, draft) {
 function permissionDecisionCard(request) {
   return el("div", { class: "decision-card" },
     el("div", { class: "decision-label" }, icon("shield-check"), "Needs your approval"),
-    el("h2", {}, request.title),
-    el("pre", { class: "permission-detail" }, detailText(request.input)),
+    ...titleAndDetail(request),
     el("textarea", { class: "decision-note", rows: 2, placeholder: "Reason, if you deny (optional)",
                      oninput: (e) => state.answerNotes.set(request.id, e.target.value) },
        state.answerNotes.get(request.id) ?? ""));
@@ -1115,9 +1114,8 @@ function permissionDecisionCard(request) {
 function policyDecisionCard(request) {
   return el("div", { class: "decision-card policy-card" },
     el("div", { class: "decision-label" }, icon("shield-check"), "Policy check"),
-    el("h2", {}, request.title),
     el("p", { class: "decision-subtext policy-reason" }, request.reason ?? ""),
-    el("pre", { class: "permission-detail" }, detailText(request.input)),
+    ...titleAndDetail(request),
     el("textarea", { class: "decision-note", rows: 2, placeholder: "Reason, if you deny (optional)",
                      oninput: (e) => state.answerNotes.set(request.id, e.target.value) },
        state.answerNotes.get(request.id) ?? ""));
@@ -1129,6 +1127,8 @@ function policyFooter(request) {
   return [
     el("div", { class: "button-row" },
       el("button", { class: "primary", type: "button", onclick: () => decide(request.id, { behavior: "allow" }) }, "Allow"),
+      el("button", { type: "button", title: "The rule that asked stops asking in this session",
+                     onclick: () => decide(request.id, { behavior: "allow", scope: "session" }) }, "Allow for this session"),
       el("button", { type: "button", onclick: () => decide(request.id,
           { behavior: "deny", message: (state.answerNotes.get(request.id) ?? "").trim() || undefined }) }, "Deny"),
       claude ? el("button", { type: "button", class: "policy-terminal",
@@ -1137,6 +1137,13 @@ function policyFooter(request) {
       ? "Allow runs this call now, without Claude Code's own prompt; Answer in terminal shows that prompt."
       : "Allow leaves the call to the agent's own approval settings. If nobody answers, the call is denied."),
   ];
+}
+
+/// The title, then the command or path, shown once: a shell call's title ("$ rm -rf build") already is the command.
+function titleAndDetail(request) {
+  const detail = detailText(request.input);
+  if (detail && request.title.includes(detail)) return [el("pre", { class: "permission-detail" }, request.title)];
+  return [el("h2", {}, request.title), el("pre", { class: "permission-detail" }, detail)];
 }
 
 function detailText(input) {
@@ -1183,7 +1190,7 @@ function outcomeText(request) {
   if (request.status === "expired") return "Expired — " + (request.outcome ?? "timed out");
   if (request.kind === "permission") return request.outcome === "allowed" ? "Allowed" : "Denied";
   if (request.kind === "policy") {
-    return { allowed: "Allowed", denied: "Denied", "handed to the terminal": "Handed to the terminal" }[request.outcome] ?? "Answered";
+    return { allowed: "Allowed", "allowed for this session": "Allowed for this session", denied: "Denied", "handed to the terminal": "Handed to the terminal" }[request.outcome] ?? "Answered";
   }
   return "Answered";
 }
@@ -2584,10 +2591,10 @@ function webhooksSection() {
 
 // MARK: policies — rules every tool call is checked against before it runs (ADR 0017)
 
-/// A blank field turns its rule off.
+/// A blank field, or 0, turns its rule off.
 function numberOrNull(text) {
   const value = Number(text.trim());
-  return text.trim() === "" || !Number.isFinite(value) || value < 0 ? null : value;
+  return text.trim() === "" || !Number.isFinite(value) || value <= 0 ? null : value;
 }
 
 async function savePolicies(change) {

@@ -91,6 +91,15 @@ public struct PolicySettings: Codable, Equatable, Sendable {
         self.maxToolCalls = maxToolCalls
     }
 
+    /// A limit as typed on a settings page: `.some(nil)` (off) for blank or 0, `.some(value)` for a positive
+    /// number, nil for text that is not a number yet, which leaves the saved limit as it was.
+    public static func limit(fromText text: String) -> Double?? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return .some(nil) }
+        guard let value = Double(trimmed), value.isFinite, value >= 0 else { return nil }
+        return .some(value > 0 ? value : nil)
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         cost = try container.decodeIfPresent(Cost.self, forKey: .cost) ?? Cost()
@@ -110,6 +119,9 @@ public struct PolicyState: Equatable, Sendable {
     public var toolCalls = 0
     /// Calls allowed before the call limit asks again; nil means `maxToolCalls`.
     public var toolCallAllowance: Int?
+    /// Rules the user allowed for the rest of the session ("Allow for this session"): they no longer ask.
+    /// A rule that denies (the cost limit) still denies.
+    public var allowedRules: Set<PolicyRule> = []
 
     public init() {}
 
@@ -143,7 +155,8 @@ public enum PolicyReducer {
             }
         }
 
-        if settings.dangerousBash.enabled, toolName == "Bash", let command = input["command"]?.stringValue,
+        if settings.dangerousBash.enabled, !state.allowedRules.contains(.dangerousBash), toolName == "Bash",
+           let command = input["command"]?.stringValue,
            let reason = dangerousReason(command, patterns: settings.dangerousBash.patterns) {
             findings.append(PolicyFinding(rule: .dangerousBash, verdict: .ask, reason: reason))
         }
@@ -154,12 +167,15 @@ public enum PolicyReducer {
                 ? "This session has made \(max) tool calls, its limit."
                 : "This session has made another \(max) tool calls since you last allowed more."))
         }
-        return PolicyCheck(findings: findings)
+        return PolicyCheck(findings: findings.filter { $0.verdict != .ask || !state.allowedRules.contains($0.rule) })
     }
 
     /// The user allowed a call the rules asked about: the budget stops asking, and the call limit lets this
-    /// call and `maxToolCalls` more through. A dangerous command has no memory; the next one asks again.
-    public static func approve(_ rules: [PolicyRule], settings: PolicySettings, state: inout PolicyState) {
+    /// call and `maxToolCalls` more through. A dangerous command has no memory; the next one asks again,
+    /// unless `forSession`, which stops every rule in `rules` asking for the rest of the session.
+    public static func approve(_ rules: [PolicyRule], forSession: Bool = false, settings: PolicySettings,
+                               state: inout PolicyState) {
+        if forSession { state.allowedRules.formUnion(rules) }
         if rules.contains(.cost) { state.budgetApproved = true }
         if rules.contains(.maxToolCalls), let max = settings.maxToolCalls {
             state.toolCallAllowance = state.toolCalls + max

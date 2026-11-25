@@ -20,7 +20,8 @@ public struct ActionRequestJSON: Codable, Equatable, Sendable {
     public let expiresAt: Double
     /// "pending", "answered" or "expired".
     public var status: String
-    /// How it ended: "allowed", "denied", "answered", "handed to the terminal", "timed out" or why it went away.
+    /// How it ended: "allowed", "allowed for this session", "denied", "answered", "handed to the terminal",
+    /// "timed out" or why it went away.
     public var outcome: String?
     public var resolvedAt: Double?
 }
@@ -62,24 +63,22 @@ public final class ActionRequestStore: @unchecked Sendable {
         /// Output for a timeout, and for an expiry.
         let timedOut: String?
         let expired: String?
-        let onAllow: (() -> Void)?
+        /// Called with whether the user allowed it for the rest of the session.
+        let onAllow: ((Bool) -> Void)?
         let reply: (String?) -> Void
     }
 
     /// Below HookShim.defaultDecisionTimeout (590 s), so the agent gets this store's answer rather than a silent timeout.
     public let timeout: TimeInterval
-    /// For approvals and questions; `timeout` when nil. Policy checks always get `timeout`.
-    private let approvalTimeout: TimeInterval?
     private let timeoutDecision: RemoteDecision?
     private let lock = NSLock()
     private var pending: [String: Pending] = [:]
     private var resolved: [ActionRequestJSON] = []
     public var onChange: (@Sendable (ActionRequestJSON) -> Void)?
 
-    public init(timeout: TimeInterval = 580, approvalTimeout: TimeInterval? = nil,
+    public init(timeout: TimeInterval = 580,
                 timeoutDecision: RemoteDecision? = .deny(message: ActionRequestStore.awayMessage, interrupt: true)) {
         self.timeout = timeout
-        self.approvalTimeout = approvalTimeout
         self.timeoutDecision = timeoutDecision
     }
 
@@ -101,7 +100,7 @@ public final class ActionRequestStore: @unchecked Sendable {
     public func open(sessionId: String, agent: any AgentKind, payload: JSONValue,
                      reply: @escaping (String?) -> Void) -> ActionRequestJSON {
         let kind = payload["hook_event_name"]?.stringValue == "PermissionRequest" ? "permission" : "question"
-        return add(sessionId: sessionId, kind: kind, payload: payload, reason: nil, timeout: approvalTimeout ?? timeout,
+        return add(sessionId: sessionId, kind: kind, payload: payload, reason: nil, timeout: timeout,
                    output: { decision in
                        decision == .handBack ? .some(nil) : agent.hookOutput(for: payload, decision: decision).map { .some($0) }
                    },
@@ -110,10 +109,11 @@ public final class ActionRequestStore: @unchecked Sendable {
     }
 
     /// A PreToolUse the policy rules asked about, answered with `agent.policyHookOutput`; `onAllow` runs when
-    /// the user allows it, so the rules that asked can stop asking. Nil when the agent's hooks cannot stop a call.
+    /// the user allows it (with true for "Allow for this session"), so the rules that asked can stop asking.
+    /// Nil when the agent's hooks cannot stop a call.
     @discardableResult
     public func openPolicy(sessionId: String, agent: any AgentKind, payload: JSONValue, reason: String,
-                           onAllow: @escaping () -> Void, reply: @escaping (String?) -> Void) -> ActionRequestJSON? {
+                           onAllow: @escaping (Bool) -> Void, reply: @escaping (String?) -> Void) -> ActionRequestJSON? {
         guard let handBack = agent.policyHookOutput(.handBack(reason: Self.unansweredPolicyMessage)) else { return nil }
         return add(sessionId: sessionId, kind: "policy", payload: payload, reason: reason, timeout: timeout,
                    output: { decision in
@@ -129,7 +129,7 @@ public final class ActionRequestStore: @unchecked Sendable {
 
     private func add(sessionId: String, kind: String, payload: JSONValue, reason: String?, timeout: TimeInterval,
                      output: @escaping (RemoteDecision) -> String??, timedOut: String?, expired: String?,
-                     onAllow: (() -> Void)?, reply: @escaping (String?) -> Void) -> ActionRequestJSON {
+                     onAllow: ((Bool) -> Void)?, reply: @escaping (String?) -> Void) -> ActionRequestJSON {
         let now = Date()
         let toolName = payload["tool_name"]?.stringValue ?? "tool"
         let input = payload["tool_input"] ?? .null
@@ -149,17 +149,18 @@ public final class ActionRequestStore: @unchecked Sendable {
         return request
     }
 
+    /// `forSession` with `.allow` on a policy request: its rules stop asking for the rest of the session.
     @discardableResult
-    public func answer(_ id: String, decision: RemoteDecision) throws -> ActionRequestJSON {
+    public func answer(_ id: String, decision: RemoteDecision, forSession: Bool = false) throws -> ActionRequestJSON {
         let outcome: String
         switch decision {
-        case .allow: outcome = "allowed"
+        case .allow: outcome = forSession ? "allowed for this session" : "allowed"
         case .deny: outcome = "denied"
         case .answer: outcome = "answered"
         case .handBack: outcome = "handed to the terminal"
         }
         if let request = resolve(id, outcome: outcome, status: "answered", allowed: decision == .allow,
-                                 output: { $0.output(decision) }) {
+                                 forSession: forSession, output: { $0.output(decision) }) {
             return request
         }
         lock.lock()
@@ -190,7 +191,7 @@ public final class ActionRequestStore: @unchecked Sendable {
     /// the answer does not fit (then it stays pending).
     @discardableResult
     private func resolve(_ id: String, outcome: String, status: String, allowed: Bool = false,
-                         output: (Pending) -> String??) -> ActionRequestJSON? {
+                         forSession: Bool = false, output: (Pending) -> String??) -> ActionRequestJSON? {
         lock.lock()
         guard var entry = pending[id], let line = output(entry) else {
             lock.unlock()
@@ -203,7 +204,7 @@ public final class ActionRequestStore: @unchecked Sendable {
         resolved.append(entry.request)
         if resolved.count > Self.resolvedLimit { resolved.removeFirst(resolved.count - Self.resolvedLimit) }
         lock.unlock()
-        if allowed { entry.onAllow?() }
+        if allowed { entry.onAllow?(forSession) }
         entry.reply(line)
         onChange?(entry.request)
         return entry.request

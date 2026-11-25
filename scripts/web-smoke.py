@@ -56,12 +56,21 @@ class Api:
             return error.code, error.read().decode(errors="replace")
 
 
-async def policy_check(api, sid, work, events, failures):
-    """ADR 0017: an `rm -rf` hits the dangerous-command rule and waits on a policy card, even in bypass mode.
-    Denied once (the folder stays), then allowed (the folder goes). Kiro's hooks cannot stop a call."""
+async def policy_check(api, sid, work, events, failures, agent):
+    """ADR 0017: a dangerous command hits the dangerous-command rule and waits on a policy card, even in bypass
+    mode. Denied once (the folder is untouched), then allowed (the command runs). Kiro's hooks cannot stop a call.
+    Codex under `approval: never` refuses `rm -f` style commands by its own exec policy, so it gets a recursive
+    chmod to 777, another built-in rule."""
     doomed = os.path.join(work, "doomed")
     os.makedirs(doomed, exist_ok=True)
+    os.chmod(doomed, 0o755)
     open(os.path.join(doomed, "keep.txt"), "w").close()
+    command = "chmod -R 777 doomed" if agent == "codex" else "rm -rf doomed"
+
+    def ran():
+        if agent == "codex":
+            return os.stat(doomed).st_mode & 0o777 == 0o777
+        return not os.path.exists(doomed)
 
     async def until(condition, timeout):
         deadline = time.time() + timeout
@@ -80,30 +89,30 @@ async def policy_check(api, sid, work, events, failures):
         await until(lambda: (latest() or {}).get("status") == "idle", 60)
         status, body = api.call("POST", f"/api/sessions/{sid}/messages", {
             "id": f"policy-{behavior}",
-            "text": ("Run this exact shell command once, with no other commands: `rm -rf doomed`. If it is blocked, "
+            "text": (f"Run this exact shell command once, with no other commands: `{command}`. If it is blocked, "
                      "do not retry; reply Done." if behavior == "deny" else
-                     "I have changed my mind and will allow it now: run `rm -rf doomed` once more, exactly as written, "
+                     f"I have changed my mind and will allow it now: run `{command}` once more, exactly as written, "
                      "then reply Done.")})
         if status != 200:
-            failures.append(f"sending the rm -rf prompt returned {status}: {body}")
+            failures.append(f"sending the {command} prompt returned {status}: {body}")
             return
         request = await until(lambda: next((e["request"] for e in events if e.get("type") == "request"
                                             and e["request"]["id"] not in seen and e["request"]["kind"] == "policy"
                                             and e["request"]["status"] == "pending"), None), 120)
         if not request:
-            failures.append(f"rm -rf raised no policy request ({behavior} pass)")
+            failures.append(f"{command} raised no policy request ({behavior} pass)")
             return
         status, body = api.call("POST", f"/api/requests/{request['id']}", {"behavior": behavior, "message": "Not in the smoke test"})
         if status != 200:
             failures.append(f"answering the policy request returned {status}: {body}")
         await until(lambda: (latest() or {}).get("status") == "idle" and (latest() or {}).get("state", {}).get("lastMessage"), 120)
         await asyncio.sleep(2)
-        exists = os.path.exists(doomed)
-        if behavior == "deny" and not exists:
-            failures.append("rm -rf ran although the policy request was denied")
-        if behavior == "allow" and exists:
-            failures.append("rm -rf did not run after the policy request was allowed")
-        print(f"policy {behavior}: doomed/ {'kept' if exists else 'deleted'}")
+        done = ran()
+        if behavior == "deny" and done:
+            failures.append(f"{command} ran although the policy request was denied")
+        if behavior == "allow" and not done:
+            failures.append(f"{command} did not run after the policy request was allowed")
+        print(f"policy {behavior}: {command} {'ran' if done else 'did not run'}")
 
 
 async def run(args):
@@ -217,7 +226,7 @@ async def run(args):
                         break
 
                 if args.agent != "kiro" and prompted:
-                    await policy_check(api, sid, work, events, failures)
+                    await policy_check(api, sid, work, events, failures, args.agent)
 
                 # A second browser (or a reload) gets the scrollback first.
                 async with websockets.connect(url, max_size=None) as again:

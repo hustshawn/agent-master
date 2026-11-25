@@ -104,6 +104,9 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
        允许了 `rm -rf build` 之后，`rm -rf node_modules` 不再问，但 `git push --force`、`terraform destroy`、
        `curl … | bash`、`DROP DATABASE` 照样问（复审：原来整条规则关掉，这些都会直接放行）。
        "命令太长/检查超时"这类没有 key，每次都问。按钮提示写明只覆盖这一类命令。
+       一次调用里的**每个**发现都算（`DangerousCommand.findings` 收集全部内置发现，用户 pattern 也全部匹配），
+       去掉本会话已放行的，剩下任何一个就 ASK，卡片显示剩下的第一个。所以放行 `rm -rf build` 后，
+       `rm -rf build && git push --force` 照样问（复审 2d1bbae：原来只看第一个发现，它被放行就整条放过，后面的 pattern 也不再查）。
      - 会 DENY 的规则（花费上限）照样 DENY。
      Web 端是 `POST /api/requests/{id}` 带 `"scope": "session"`，线上格式没变：放行哪一类由服务端从这次检查的
      finding 里取（`HookRequestRouter` 把整个 `PolicyCheck` 交给 `PolicyBook.approve`），不经客户端传，旧客户端照常用。

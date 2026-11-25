@@ -152,6 +152,25 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(check("rm -rf build", settings, state: &state).verdict, .deny, "a limit that denies still denies")
     }
 
+    /// Re-review of 2d1bbae: an allowed kind must not hide another dangerous command in the same call.
+    func testAnAllowedKindDoesNotHideAnotherFindingInTheSameCall() {
+        let settings = PolicySettings(dangerousBash: .init(patterns: ["deploy\\s+prod"]))
+        var state = PolicyState()
+        PolicyReducer.approve(check("rm -rf build", settings, state: &state), forSession: true, settings: settings,
+                              state: &state)
+        let both = check("rm -rf build && git push --force", settings, state: &state)
+        XCTAssertEqual(both.verdict, .ask)
+        XCTAssertEqual(both.findings.map(\.sessionKey), ["git push --force"], "the card shows the first one left")
+        XCTAssertEqual(check("rm -rf x; terraform destroy", settings, state: &state).verdict, .ask)
+        let pattern = check("rm -rf build && deploy prod", settings, state: &state)
+        XCTAssertEqual(pattern.verdict, .ask, "a pattern match after an allowed built-in finding")
+        XCTAssertEqual(pattern.findings.map(\.sessionKey), ["pattern: deploy\\s+prod"])
+        XCTAssertEqual(check("rm -rf build; rm -rf dist", settings, state: &state).verdict, .allow,
+                       "only allowed kinds")
+        XCTAssertEqual(DangerousCommand.findings(in: "rm -rf a && git push -f; bash -c 'terraform apply'"),
+                       ["rm with -r and -f", "git push --force", "terraform apply"])
+    }
+
     func testALimitTypedBlankOrZeroIsOff() {
         XCTAssertEqual(PolicySettings.limit(fromText: ""), .some(nil))
         XCTAssertEqual(PolicySettings.limit(fromText: " 0 "), .some(nil))
@@ -196,6 +215,7 @@ final class PolicyTests: XCTestCase {
         let commands = ["rm " + String(repeating: " -r", count: 30_000),
                         "chmod " + String(repeating: " -r", count: 30_000),
                         "git " + String(repeating: "push x ", count: 15_000),
+                        String(repeating: "rm -rf x; git push -f; ", count: 4_000),   // every finding is collected
                         "cat > doc.md <<'EOF'\n" + String(repeating: "A line of prose without separators.\n", count: 3_000) + "EOF"]
         for command in commands {
             let started = Date()

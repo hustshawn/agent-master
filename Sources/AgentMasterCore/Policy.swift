@@ -164,8 +164,8 @@ public enum PolicyReducer {
         }
 
         if settings.dangerousBash.enabled, toolName == "Bash", let command = input["command"]?.stringValue,
-           let found = dangerousFinding(command, patterns: settings.dangerousBash.patterns),
-           !(found.key.map(state.allowedDangerousFindings.contains) ?? false) {
+           let found = dangerousFinding(command, patterns: settings.dangerousBash.patterns,
+                                        allowed: state.allowedDangerousFindings) {
             findings.append(PolicyFinding(rule: .dangerousBash, verdict: .ask, reason: found.reason,
                                           sessionKey: found.key))
         }
@@ -215,22 +215,28 @@ public enum PolicyReducer {
         dangerousFinding(command, patterns: patterns)?.reason
     }
 
-    /// The reason, and the kind of command for "Allow for this session" (nil when it cannot be allowed).
-    static func dangerousFinding(_ command: String, patterns: [String]) -> (reason: String, key: String?)? {
+    /// The first finding in the command not in `allowed` (the kinds allowed for the session), with its kind for
+    /// "Allow for this session" (nil when it cannot be allowed). Every built-in finding and every pattern match
+    /// counts, so an allowed kind does not hide another dangerous command in the same call.
+    static func dangerousFinding(_ command: String, patterns: [String],
+                                 allowed: Set<String> = []) -> (reason: String, key: String?)? {
         guard command.utf8.count <= maxCommandLength else {
             return ("The command is too long to check (\(command.utf8.count / 1000) KB).", nil)
         }
-        if let found = DangerousCommand.finding(in: command) { return ("The command looks dangerous: \(found).", found) }
+        if let found = DangerousCommand.findings(in: command).first(where: { !allowed.contains($0) }) {
+            return ("The command looks dangerous: \(found).", found)
+        }
         guard !patterns.isEmpty else { return nil }
         let segments = DangerousCommand.split(command).map(\.text)
         if segments.contains(where: { $0.utf8.count > maxPatternInputLength }) {
             return ("A command is too long for your dangerous-command patterns to check.", nil)
         }
-        switch PatternMatcher.firstMatch(segments, patterns: patterns, timeout: patternTimeout) {
-        case .match(let pattern):
-            return ("The command matches your dangerous-command pattern: \(pattern)", "pattern: \(pattern)")
+        switch PatternMatcher.matches(segments, patterns: patterns, timeout: patternTimeout) {
+        case .matches(let matched):
+            return matched.first { !allowed.contains("pattern: \($0)") }.map {
+                ("The command matches your dangerous-command pattern: \($0)", "pattern: \($0)")
+            }
         case .timedOut: return ("Your dangerous-command patterns took too long to check this command.", nil)
-        case .none: return nil
         }
     }
 

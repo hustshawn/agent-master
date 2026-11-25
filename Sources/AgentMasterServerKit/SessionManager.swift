@@ -52,15 +52,19 @@ public final class SessionManager: @unchecked Sendable {
         public var modelCatalog: [String: [AgentChoice]]?
         /// How push notifications reach the push services; replaced in tests.
         public var pushTransport: any WebPushTransport
+        /// How webhooks are posted, with their 5 s limit; replaced in tests.
+        public var webhookTransport: any WebPushTransport
 
         public init(dataDirectory: URL, executableURL: URL, environment: [String: String]? = nil,
                     modelCatalog: [String: [AgentChoice]]? = nil,
-                    pushTransport: any WebPushTransport = HTTPClientWebPushTransport()) {
+                    pushTransport: any WebPushTransport = HTTPClientWebPushTransport(),
+                    webhookTransport: any WebPushTransport = HTTPClientWebPushTransport(timeout: 5)) {
             self.dataDirectory = dataDirectory
             self.executableURL = executableURL
             self.environment = environment
             self.modelCatalog = modelCatalog
             self.pushTransport = pushTransport
+            self.webhookTransport = webhookTransport
         }
     }
 
@@ -72,15 +76,19 @@ public final class SessionManager: @unchecked Sendable {
     private let journalLock = NSLock()
     private var hookServer: HookServer?
     private let requests = ActionRequestStore()
+    private let policyBook = PolicyBook()
     private let messages = MessageStore()
     private let attachments = AttachmentStore()
     public let push: PushNotifier
+    private let webhooks: WebhookNotifier
 
     private let lock = NSLock()
     private var sessions: [ServerSession] = []
     private var listeners: [UUID: @Sendable (ServerEvent) -> Void] = [:]
     /// While relaunching the journal's sessions, do not overwrite it with the partial list.
     private var restoring = false
+    /// Set by `shutdown()`: the agents it stops did not quit by themselves, so they are no news.
+    private var stopping = false
 
     public init(_ configuration: Configuration) throws {
         paths = AppPaths(supportDirectory: configuration.dataDirectory,
@@ -92,6 +100,7 @@ public final class SessionManager: @unchecked Sendable {
         try paths.prepare()
         settings = ServerSettings(url: configuration.dataDirectory.appendingPathComponent("settings.json"))
         push = try PushNotifier(dataDirectory: configuration.dataDirectory, transport: configuration.pushTransport)
+        webhooks = WebhookNotifier(settings: { [settings] in settings.notifications }, transport: configuration.webhookTransport)
         paths.removeAllSessionDirectories()
         let server = HookServer(socketPath: paths.socketPath) { [weak self] message, reply in
             self?.route(message)
@@ -172,9 +181,15 @@ public final class SessionManager: @unchecked Sendable {
             session?.processExited()
             guard let self else { return }
             self.requests.expire(sessionId: id, reason: "session ended")
-            // A closed session is gone from the list by now; only an agent that quit by itself is news.
-            if let session = self.session(id: id) {
+            self.policyBook.remove(sessionId: id)
+            // A closed session is gone from the list by now, and a server that is stopping ends them all; only
+            // an agent that quit by itself is news.
+            self.lock.lock()
+            let stopping = self.stopping
+            self.lock.unlock()
+            if !stopping, let session = self.session(id: id) {
                 self.push.notify(PushPayload(title: "Agent exited", body: session.json.title, sessionId: id, tag: "exit-\(id)"))
+                self.webhooks.notify(WebhookEvent(kind: "exit", sessionId: id, sessionTitle: session.webhookName))
             }
         }
         settings.recordProject(projectPath)
@@ -254,6 +269,7 @@ public final class SessionManager: @unchecked Sendable {
         lock.unlock()
         session.onChange = nil
         requests.expire(sessionId: id, reason: "session closed")
+        policyBook.remove(sessionId: id)
         messages.removeAll(sessionId: id)
         attachments.removeAll(sessionId: id)
         session.process.terminate()
@@ -276,9 +292,10 @@ public final class SessionManager: @unchecked Sendable {
 
     public var messageReceipts: [MessageReceiptJSON] { messages.all }
 
+    /// `forSession`: "Allow for this session" on a policy check.
     @discardableResult
-    public func answer(requestId: String, decision: RemoteDecision) throws -> ActionRequestJSON {
-        try requests.answer(requestId, decision: decision)
+    public func answer(requestId: String, decision: RemoteDecision, forSession: Bool = false) throws -> ActionRequestJSON {
+        try requests.answer(requestId, decision: decision, forSession: forSession)
     }
 
     /// Types `text` into the session as a prompt, only while the agent waits for one. A repeated `messageId`
@@ -341,9 +358,15 @@ public final class SessionManager: @unchecked Sendable {
     }
 
     public func shutdown() {
+        lock.lock()
+        stopping = true
+        lock.unlock()
         journalLock.lock()
         journal.freeze()
         journalLock.unlock()
+        // Answer the waiting hooks first: stopping the hook server would release them with no output, which a
+        // Codex policy check reads as "run it" (review of #19, S1). Expired, a policy check is handed back.
+        requests.expireAll(reason: "AgentMaster stopped")
         hookServer?.stop()
         hookServer = nil
         lock.lock()
@@ -406,12 +429,27 @@ public final class SessionManager: @unchecked Sendable {
 
     public var recentProjects: [String] { settings.recentProjects }
 
+    /// Webhooks and the public address for their links. Read masked (see `NotificationSettings.masked`);
+    /// a write keeps a webhook whose URL is still masked (see `merging`).
+    public var notifications: NotificationSettings {
+        get { settings.notifications.masked }
+        set { settings.notifications = settings.notifications.merging(newValue) }
+    }
+
+    /// The rules every PreToolUse is checked against; a change applies from the next tool call.
+    public var policies: PolicySettings {
+        get { settings.policies }
+        set { settings.policies = newValue }
+    }
+
     // MARK: private
 
     private func route(_ message: WireMessage) {
         guard let session = session(id: message.sessionId) else { return }
         switch message.kind {
-        case .statusline: session.receive(statusLine: message.payload)
+        case .statusline:
+            session.receive(statusLine: message.payload)
+            policyBook.observe(statusLine: message.payload, sessionId: session.id)
         case .event, .request: session.receive(hook: message.payload)
         }
         // No request outlives its turn: a hook still waiting then was cancelled, or answered in the terminal.
@@ -428,29 +466,32 @@ public final class SessionManager: @unchecked Sendable {
             push.notify(PushPayload(title: "Turn finished · \(json.title)",
                                     body: PushNotifier.clipped(json.state.lastMessage ?? "Ready for your next message."),
                                     sessionId: session.id, tag: "turn-\(session.id)"))
+            webhooks.notify(WebhookEvent(kind: "turn", sessionId: session.id, sessionTitle: session.webhookName))
         case "SessionEnd": requests.expire(sessionId: session.id, reason: "session ended")
         default: break
         }
     }
 
-    /// Holds the hook for an answer from a browser when the agent can take one; otherwise its terminal asks,
-    /// as in the Mac app.
+    /// Checks a PreToolUse against the policy rules, and holds the hook for an answer from a browser when the
+    /// rules ask or the agent can take one; otherwise its terminal asks, as in the Mac app.
     private func open(_ message: WireMessage, reply: @escaping (String?) -> Void) {
-        // Every request an agent answers remotely can be denied, which is also what a timeout sends.
-        guard let session = session(id: message.sessionId),
-              session.agent.hookOutput(for: message.payload, decision: .deny(message: "", interrupt: false)) != nil else {
-            reply(nil)
-            return
+        guard let session = session(id: message.sessionId) else { return reply(nil) }
+        HookRequestRouter.route(sessionId: session.id, payload: message.payload, reply: reply, agent: session.agent,
+                                settings: settings.policies, policies: policyBook, requests: requests,
+                                remote: true) { request in
+            let question = request.input["questions"]?[0]?["question"]?.stringValue
+            switch request.kind {
+            case "question": session.apply([.needsAttention(message: question.map { "Question: " + $0 } ?? "Question")])
+            case "policy": session.apply([.needsAttention(message: "Policy: " + request.title)])
+            default: break
+            }
+            let heading = ["question": "Question · ", "policy": "Policy check · "][request.kind] ?? "Approval needed · "
+            push.notify(PushPayload(title: heading + session.json.title, body: PushNotifier.clipped(question ?? request.title),
+                                    sessionId: session.id, tag: "request-\(request.id)"),
+                        urgency: "high")
+            webhooks.notify(WebhookEvent(kind: request.kind == "permission" ? "approval" : request.kind,
+                                         sessionId: session.id, sessionTitle: session.webhookName))
         }
-        let request = requests.open(sessionId: session.id, agent: session.agent, payload: message.payload, reply: reply)
-        let question = request.input["questions"]?[0]?["question"]?.stringValue
-        if request.kind == "question" {
-            session.apply([.needsAttention(message: question.map { "Question: " + $0 } ?? "Question")])
-        }
-        push.notify(PushPayload(title: (request.kind == "question" ? "Question · " : "Approval needed · ") + session.json.title,
-                                body: PushNotifier.clipped(question ?? request.title),
-                                sessionId: session.id, tag: "request-\(request.id)"),
-                    urgency: "high")
     }
 
     private func broadcast(_ event: ServerEvent) {

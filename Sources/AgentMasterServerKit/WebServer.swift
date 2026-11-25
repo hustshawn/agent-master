@@ -3,12 +3,14 @@ import Hummingbird
 import HummingbirdWebSocket
 import NIOCore
 import Logging
+import AgentMasterCore
 import AgentMasterBridge
 
 /// The browser's API. Every /api route needs the server token, as `Authorization: Bearer <token>`
 /// or, for WebSockets (which cannot set headers from a browser), `?token=<token>`.
 ///
-///     GET    /api/agents                               agents, their settings, and General settings
+///     GET    /api/agents                               agents, their settings, General settings, the policy rules
+///                                                      and notifications (webhook URLs masked)
 ///     PUT    /api/agents/{agent}/options/{option}      {"value": "..."|null}
 ///     PUT    /api/general                              {"restoreSessionsOnLaunch"?: bool, "aiSessionTitles"?: bool}
 ///     GET    /api/sessions                             every session
@@ -25,8 +27,15 @@ import AgentMasterBridge
 ///     PUT    /api/sessions/{id}/reviewed               {"reviewed": bool}: marks the last turn's result reviewed
 ///     POST   /api/sessions/{id}/interrupt              stops the current turn (Esc)
 ///     GET    /api/requests                             open and recently resolved approvals and questions
-///     POST   /api/requests/{id}                        {"behavior": "allow"|"deny", "message"?} or {"answers": {question: label}};
+///     POST   /api/requests/{id}                        {"behavior": "allow"|"deny", "message"?} or {"answers": {question: label}},
+///                                                      or {"behavior": "terminal"}: the agent's own UI decides (ADR 0017);
+///                                                      "scope": "session" with allow stops that kind of dangerous
+///                                                      command (or the limit) asking again in that session;
 ///                                                      ActionRequestJSON (409 once answered or expired)
+///     PUT    /api/policies                             PolicySettings: replaces the policy rules
+///     PUT    /api/notifications                        NotificationSettings: webhooks, publicURL and events (the
+///                                                      kinds webhooks post); a webhook sent back with its masked
+///                                                      URL keeps the stored one
 ///     GET    /api/push/key                             {"publicKey"}: the VAPID key for pushManager.subscribe
 ///     GET    /api/push/subscriptions                   {"subscriptions": [{"endpoint", "label", "createdAt"}]}
 ///     POST   /api/push/subscriptions                   a PushSubscription's JSON plus "label"
@@ -57,7 +66,8 @@ public enum WebServer {
 
         api.get("agents") { _, _ in
             AgentsResponse(agents: manager.agents(), restoreSessionsOnLaunch: manager.restoreSessionsOnLaunch,
-                           aiSessionTitles: manager.aiSessionTitles, home: NSHomeDirectory())
+                           aiSessionTitles: manager.aiSessionTitles, policies: manager.policies,
+                           notifications: manager.notifications, home: NSHomeDirectory())
         }
         api.put("agents/:agent/options/:option") { request, context -> HTTPResponse.Status in
             let body = try await request.decode(as: OptionRequest.self, context: context)
@@ -71,6 +81,33 @@ public enum WebServer {
             let body = try await request.decode(as: GeneralRequest.self, context: context)
             if let restore = body.restoreSessionsOnLaunch { manager.restoreSessionsOnLaunch = restore }
             if let titles = body.aiSessionTitles { manager.aiSessionTitles = titles }
+            return .noContent
+        }
+        api.put("policies") { request, context -> HTTPResponse.Status in
+            var body = try await request.decode(as: PolicySettings.self, context: context)
+            // 0 or less is off, as on the Mac page; stored as off so Settings reads it back that way.
+            body.cost.askAtUSD = body.cost.askAtUSD.flatMap { $0 > 0 ? $0 : nil }
+            body.cost.denyAtUSD = body.cost.denyAtUSD.flatMap { $0 > 0 ? $0 : nil }
+            body.maxToolCalls = body.maxToolCalls.flatMap { $0 > 0 ? $0 : nil }
+            manager.policies = body
+            return .noContent
+        }
+        api.put("notifications") { request, context -> HTTPResponse.Status in
+            let body = try await request.decode(as: NotificationSettings.self, context: context)
+            if let bad = body.webhooks.first(where: { !NotificationSettings.formats.contains($0.format) }) {
+                throw HTTPError(.badRequest, message: "Unknown webhook format \(bad.format); use ntfy, telegram or json.")
+            }
+            // A URL without http(s):// would be saved and then never posted to (WebhookNotifier.request).
+            if body.webhooks.contains(where: { !NotificationSettings.isPostable($0.url) }) {
+                throw HTTPError(.badRequest, message: "A webhook URL must start with http:// or https:// and name a host.")
+            }
+            if let bad = body.events.first(where: { !NotificationSettings.eventKinds.contains($0) }) {
+                throw HTTPError(.badRequest, message: "Unknown webhook event \(bad); use approval, question, policy, turn or exit.")
+            }
+            if body.webhooks.contains(where: { $0.format == "telegram" && $0.url.lowercased().hasPrefix("http://") }) {
+                throw HTTPError(.badRequest, message: "A Telegram webhook carries the bot token, so it must use https.")
+            }
+            manager.notifications = body
             return .noContent
         }
 
@@ -156,10 +193,15 @@ public enum WebServer {
                 decision = .allow
             } else if body.behavior == "deny" {
                 decision = .deny(message: body.message ?? "The user denied this.", interrupt: false)
+            } else if body.behavior == "terminal" {
+                decision = .handBack
             } else {
-                throw HTTPError(.badRequest, message: "Send behavior allow or deny, or answers.")
+                throw HTTPError(.badRequest, message: "Send behavior allow, deny or terminal, or answers.")
             }
-            return try mapErrors { try manager.answer(requestId: context.parameters.require("id"), decision: decision) }
+            return try mapErrors {
+                try manager.answer(requestId: context.parameters.require("id"), decision: decision,
+                                   forSession: decision == .allow && body.scope == "session")
+            }
         }
 
         api.get("push/key") { _, _ in PushKeyResponse(publicKey: manager.push.publicKey) }
@@ -358,6 +400,8 @@ struct AgentsResponse: ResponseEncodable {
     let agents: [AgentJSON]
     let restoreSessionsOnLaunch: Bool
     let aiSessionTitles: Bool
+    let policies: PolicySettings
+    let notifications: NotificationSettings
     let home: String
 }
 
@@ -407,6 +451,8 @@ struct MessageRequest: Decodable {
 
 struct AnswerRequest: Decodable {
     let behavior: String?
+    /// "session": with allow, for the rest of the session.
+    let scope: String?
     let message: String?
     let answers: [String: String]?
 }

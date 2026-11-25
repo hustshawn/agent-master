@@ -10,8 +10,24 @@ public final class ServerSettings: @unchecked Sendable {
         var options: [String: String] = [:]
         var recentProjects: [String] = []
         var restoreSessionsOnLaunch = true
-        /// Optional so a file written before it existed still decodes; nil means on.
+        /// nil means on.
         var aiSessionTitles: Bool?
+        var policies = PolicySettings()
+        var notifications = NotificationSettings()
+
+        init() {}
+
+        /// Every key may be missing, so a file written before a setting existed keeps all the others.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            options = try container.decodeIfPresent([String: String].self, forKey: .options) ?? [:]
+            recentProjects = try container.decodeIfPresent([String].self, forKey: .recentProjects) ?? []
+            restoreSessionsOnLaunch = try container.decodeIfPresent(Bool.self, forKey: .restoreSessionsOnLaunch) ?? true
+            aiSessionTitles = try container.decodeIfPresent(Bool.self, forKey: .aiSessionTitles)
+            policies = try container.decodeIfPresent(PolicySettings.self, forKey: .policies) ?? PolicySettings()
+            notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications)
+                ?? NotificationSettings()
+        }
     }
 
     private let url: URL
@@ -68,6 +84,16 @@ public final class ServerSettings: @unchecked Sendable {
         set { write { $0.aiSessionTitles = newValue } }
     }
 
+    public var policies: PolicySettings {
+        get { read(\.policies) }
+        set { write { $0.policies = newValue } }
+    }
+
+    public var notifications: NotificationSettings {
+        get { read(\.notifications) }
+        set { write { $0.notifications = newValue } }
+    }
+
     private func read<T>(_ body: (Stored) -> T) -> T {
         lock.lock()
         defer { lock.unlock() }
@@ -80,6 +106,20 @@ public final class ServerSettings: @unchecked Sendable {
         body(&stored)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(stored) { try? data.write(to: url, options: .atomic) }
+        guard let data = try? encoder.encode(stored) else { return }
+        Self.writeOwnerOnly(data, to: url)
+    }
+
+    /// Owner only from the first byte, since webhook URLs carry tokens: a temporary file created 0600, then
+    /// renamed over the old one, so a reader never sees a half-written file either.
+    static func writeOwnerOnly(_ data: Data, to url: URL) {
+        let temporary = url.path + ".tmp-\(getpid())"
+        let fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+        guard fd >= 0 else { return }
+        fchmod(fd, 0o600)   // O_TRUNC kept an older file's mode
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        let written = (try? handle.write(contentsOf: data)) != nil
+        try? handle.close()
+        if written { rename(temporary, url.path) } else { unlink(temporary) }
     }
 }

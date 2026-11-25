@@ -85,14 +85,19 @@ public protocol WebPushTransport: Sendable {
 /// The live `WebPushTransport`, over AsyncHTTPClient: SwiftNIO like the rest of the server, where
 /// URLSession on Linux would add a libcurl dependency to the server package.
 public struct HTTPClientWebPushTransport: WebPushTransport {
-    public init() {}
+    let timeout: Int64
+
+    /// `timeout` in seconds.
+    public init(timeout: Int64 = 30) {
+        self.timeout = timeout
+    }
 
     public func post(url: URL, headers: [String: String], body: Data) async throws -> Int {
         var request = HTTPClientRequest(url: url.absoluteString)
         request.method = .POST
         for (field, value) in headers { request.headers.add(name: field, value: value) }
         request.body = .bytes(ByteBuffer(bytes: body))
-        let response = try await HTTPClient.shared.execute(request, timeout: .seconds(30))
+        let response = try await HTTPClient.shared.execute(request, timeout: .seconds(timeout))
         return Int(response.status.code)
     }
 }

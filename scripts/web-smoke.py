@@ -6,6 +6,8 @@ Usage: uv run --with websockets scripts/web-smoke.py [--agent claude|codex|kiro]
 Starts the server on a free port with a scratch data directory, sets the agent's defaults through the API,
 starts a session in a scratch project, answers the agent's first-run prompts, sends one task that edits a
 file, and checks that the session state (status, first prompt, file change) and the terminal stream arrive.
+Then (Claude and Codex) has the agent run `rm -rf` on a scratch folder: the policy request is denied once and
+allowed once, checking the folder after each.
 Costs a few cents of model tokens. Exits 0 on PASS.
 """
 import argparse, asyncio, json, os, re, shutil, socket, subprocess, sys, tempfile, time, urllib.error, urllib.request
@@ -27,6 +29,23 @@ def visible(raw):
     """Terminal output without escape sequences or whitespace (TUIs draw spaces as cursor moves)."""
     text = re.sub(rb"\x1b\[[0-9;?>]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]|\x1b[=>]", b"", raw)
     return re.sub(rb"\s+", b"", text)
+
+
+# A choice menu on screen (an update offer, a dialog): anything typed would answer it, and the prompt's "1)"
+# picks option 1, so the prompt waits until every menu on screen is one the loop below answers.
+MENU = (b"Entertoconfirm", b"Pressentertocontinue", b"Updatenow", b"\xe2\x80\xba1.", b"\xe2\x9d\xaf1.")
+
+
+def codex_wrapper(scratch):
+    """A codex that never offers to update itself at start (that prompt once updated the local Codex)."""
+    real = shutil.which("codex")
+    if not real:
+        return None
+    path = os.path.join(scratch, "codex")
+    with open(path, "w") as f:
+        f.write(f'#!/bin/sh\nexec {json.dumps(real)} -c check_for_update_on_startup=false "$@"\n')
+    os.chmod(path, 0o755)
+    return path
 
 
 def free_port():
@@ -54,6 +73,65 @@ class Api:
             return error.code, error.read().decode(errors="replace")
 
 
+async def policy_check(api, sid, work, events, failures, agent):
+    """ADR 0017: a dangerous command hits the dangerous-command rule and waits on a policy card, even in bypass
+    mode. Denied once (the folder is untouched), then allowed (the command runs). Kiro's hooks cannot stop a call.
+    Codex under `approval: never` refuses `rm -f` style commands by its own exec policy, so it gets a recursive
+    chmod to 777, another built-in rule."""
+    doomed = os.path.join(work, "doomed")
+    os.makedirs(doomed, exist_ok=True)
+    os.chmod(doomed, 0o755)
+    open(os.path.join(doomed, "keep.txt"), "w").close()
+    command = "chmod -R 777 doomed" if agent == "codex" else "rm -rf doomed"
+
+    def ran():
+        if agent == "codex":
+            return os.stat(doomed).st_mode & 0o777 == 0o777
+        return not os.path.exists(doomed)
+
+    async def until(condition, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            found = condition()
+            if found:
+                return found
+            await asyncio.sleep(0.5)
+        return None
+
+    def latest():
+        return next((e["session"] for e in reversed(events) if e.get("session", {}).get("id") == sid), None)
+
+    for behavior in ("deny", "allow"):
+        seen = {e["request"]["id"] for e in events if e.get("type") == "request"}
+        await until(lambda: (latest() or {}).get("status") == "idle", 60)
+        status, body = api.call("POST", f"/api/sessions/{sid}/messages", {
+            "id": f"policy-{behavior}",
+            "text": (f"Run this exact shell command once, with no other commands: `{command}`. If it is blocked, "
+                     "do not retry; reply Done." if behavior == "deny" else
+                     f"I have changed my mind and will allow it now: run `{command}` once more, exactly as written, "
+                     "then reply Done.")})
+        if status != 200:
+            failures.append(f"sending the {command} prompt returned {status}: {body}")
+            return
+        request = await until(lambda: next((e["request"] for e in events if e.get("type") == "request"
+                                            and e["request"]["id"] not in seen and e["request"]["kind"] == "policy"
+                                            and e["request"]["status"] == "pending"), None), 120)
+        if not request:
+            failures.append(f"{command} raised no policy request ({behavior} pass)")
+            return
+        status, body = api.call("POST", f"/api/requests/{request['id']}", {"behavior": behavior, "message": "Not in the smoke test"})
+        if status != 200:
+            failures.append(f"answering the policy request returned {status}: {body}")
+        await until(lambda: (latest() or {}).get("status") == "idle" and (latest() or {}).get("state", {}).get("lastMessage"), 120)
+        await asyncio.sleep(2)
+        done = ran()
+        if behavior == "deny" and done:
+            failures.append(f"{command} ran although the policy request was denied")
+        if behavior == "allow" and not done:
+            failures.append(f"{command} did not run after the policy request was allowed")
+        print(f"policy {behavior}: {command} {'ran' if done else 'did not run'}")
+
+
 async def run(args):
     if not args.server:
         subprocess.run(["swift", "build", "--product", "agentmaster-server"], cwd=ROOT, check=True)
@@ -71,9 +149,13 @@ async def run(args):
     log = open(os.path.join(scratch, "server.log"), "w")
     api = Api(f"http://127.0.0.1:{port}", token)
 
+    env = dict(os.environ)
+    if args.agent == "codex" and (wrapper := codex_wrapper(scratch)):
+        env["AGENTMASTER_CODEX_PATH"] = wrapper
+
     def start_server():
         process = subprocess.Popen([args.server, "--port", str(port), "--data-dir", os.path.join(scratch, "data"),
-                                    "--token", token], stdout=log, stderr=subprocess.STDOUT)
+                                    "--token", token], stdout=log, stderr=subprocess.STDOUT, env=env)
         for _ in range(100):
             try:
                 if api.call("GET", "/api/recents")[0] == 200:
@@ -122,6 +204,7 @@ async def run(args):
                     await term.send(json.dumps({"type": "input", "data": text}))
 
                 answered, prompted, deadline, quiet_since = set(), False, time.time() + 300, time.time()
+                add_dir_tries = 0
                 while time.time() < deadline:
                     try:
                         chunk = await asyncio.wait_for(term.recv(), timeout=0.5)
@@ -130,31 +213,43 @@ async def run(args):
                     except asyncio.TimeoutError:
                         pass
                     flat = visible(screen)
-                    if "update" not in answered and b"1.Updatenow" in flat and b"Pressentertocontinue" in flat:
-                        answered.add("update")   # codex: "2. Skip" this once
-                        await send("\x1b[B"); await asyncio.sleep(0.5); await send("\r")
-                        screen = b""
-                        continue
+                    if b"Updatenow" in flat:
+                        # Started with check_for_update_on_startup=false, so this should not show; never answer it.
+                        failures.append(f"{args.agent} offered to update itself; the smoke does not answer that")
+                        break
                     if "trust-all" not in answered and b"Yes,Iaccept" in flat:
                         answered.add("trust-all")   # kiro: accept --trust-all-tools for this run
                         await asyncio.sleep(2); await send("\x1b[B"); await asyncio.sleep(0.5); await send("\r")
                         screen = b""
                         continue
+                    # claude 2.1.32x also asks to trust the session folder passed with --add-dir; a keystroke can
+                    # land before the dialog takes input, so it is answered again while it stays on screen.
+                    if add_dir_tries < 4 and b"Yes,addit" in flat[-400:] and b"Entertoconfirm" in flat[-400:]:
+                        add_dir_tries += 1
+                        await asyncio.sleep(1); await send("\x1b[B"); await asyncio.sleep(0.5); await send("\r")
+                        screen, quiet_since = b"", time.time()
+                        continue
                     # Claude's folder trust dialog, then Codex's (worded differently across Codex versions).
-                    if "trust" not in answered and (b"Entertoconfirm" in flat or b"Doyoutrustthecontents" in flat
-                                                    or b"Trustthisfolder?" in flat):
+                    if "trust" not in answered and b"trust" in flat[-2000:].lower() and (
+                            b"Entertoconfirm" in flat or b"Doyoutrustthecontents" in flat or b"Trustthisfolder?" in flat):
                         answered.add("trust")
                         if args.agent == "claude":
                             await asyncio.sleep(0.5); await send("\x1b[B")   # "Yes, I trust this folder"
                         await asyncio.sleep(0.5); await send("\r")
                         screen = b""
                         continue
-                    if not prompted and time.time() - quiet_since > 3 and len(screen) > 0:
+                    if not prompted and time.time() - quiet_since > 3 and len(screen) > 0 \
+                            and not any(marker in flat[-2000:] for marker in MENU):
                         await send(PROMPT); await asyncio.sleep(1); await send("\r")
                         prompted = True
                     latest = next((e["session"] for e in reversed(events) if e.get("session", {}).get("id") == sid), None)
                     if prompted and latest and latest["state"].get("lastMessage") and latest["status"] == "idle":
                         break
+
+                if not prompted and any(marker in visible(screen)[-2000:] for marker in MENU):
+                    failures.append("a prompt the smoke does not recognise stayed on screen; nothing was typed into it")
+                if args.agent != "kiro" and prompted:
+                    await policy_check(api, sid, work, events, failures, args.agent)
 
                 # A second browser (or a reload) gets the scrollback first.
                 async with websockets.connect(url, max_size=None) as again:

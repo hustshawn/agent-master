@@ -33,6 +33,16 @@ final class AppModel {
     @ObservationIgnored private var server: HookServer?
     @ObservationIgnored private let newSessionPanel = NewSessionPanel()
     @ObservationIgnored private var environmentTask: Task<[String: String], Never>?
+    /// Policy checks waiting on a card; unanswered ones go back to the terminal, since the user is at this Mac
+    /// (ADR 0017). Approvals and questions get no card: Claude Code draws its own prompt in the terminal while
+    /// the hook waits, so they are answered at once and only post a notification.
+    @ObservationIgnored let requests = ActionRequestStore(timeoutDecision: nil)
+    @ObservationIgnored private let policyBook = PolicyBook()
+    /// Which agent each session runs, for the hook thread, which cannot read `sessions`.
+    @ObservationIgnored private let sessionAgents = SessionAgents()
+    /// The open requests, for the cards; kept in step with `requests` on the main actor.
+    private(set) var pendingRequests: [ActionRequestJSON] = []
+    @ObservationIgnored private let notifications = AppNotifications()
 
     init() {
         recentProjects = recents.paths
@@ -47,15 +57,28 @@ final class AppModel {
         do {
             try paths.prepare()
             paths.removeAllSessionDirectories()
+            let requests = self.requests, policyBook = self.policyBook, sessionAgents = self.sessionAgents
+            requests.onChange = { request in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self.requestChanged(request) }
+                }
+            }
             let server = HookServer(socketPath: paths.socketPath) { message, reply in
-                // M3 replaces this with the native approval / question overlays.
-                if message.kind == .request { reply(nil) }
+                if message.kind == .statusline { policyBook.observe(statusLine: message.payload, sessionId: message.sessionId) }
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated { self.route(message) }
                 }
+                guard message.kind == .request else { return }
+                // On this thread, so a tool call nothing objects to is answered at once (ADR 0017).
+                guard let agent = sessionAgents[message.sessionId] else { return reply(nil) }
+                HookRequestRouter.route(sessionId: message.sessionId, payload: message.payload, reply: reply, agent: agent,
+                                        settings: GeneralSettings.policies(.standard), policies: policyBook,
+                                        requests: requests, remote: false) { _ in }
             }
             try server.start()
             self.server = server
+            notifications.onOpen = { id in MainActor.assumeIsolated { self.selectedId = id } }
+            notifications.start()
         } catch {
             errorMessage = "Could not start the hook server: \(error)"
         }
@@ -147,6 +170,8 @@ final class AppModel {
         do {
             let base = await environment()
             let id = UUID().uuidString
+            // Before the agent starts, so its first hook already finds which agent it is.
+            sessionAgents[id] = agent
             var preferences = preferenceStore.preferences(for: agent.id)
             if let model { preferences.values[AgentOption.modelId] = model }
             let launch = try agent.launch(AgentLaunchRequest(
@@ -223,6 +248,9 @@ final class AppModel {
         sessions.removeAll { $0.id == id }
         if selectedId == id { selectedId = next }
         session.terminal.terminate()
+        sessionAgents[id] = nil
+        requests.expire(sessionId: id, reason: "session closed")
+        policyBook.remove(sessionId: id)
         // claude reads settings.json only at startup, so it can go as soon as the process is signalled.
         paths.removeSessionDirectory(sessionId: id)
     }
@@ -230,6 +258,8 @@ final class AppModel {
     func shutdown() {
         // Terminating below marks every session ended; the journal must keep what was open.
         journal.freeze()
+        // Before stopping the hook server, which would release a Codex policy check with no output: "run it".
+        requests.expireAll(reason: "AgentMaster quit")
         server?.stop()
         server = nil
         sessions.forEach { $0.terminal.terminate() }
@@ -290,8 +320,81 @@ final class AppModel {
         case .event, .request:
             session.receive(hook: message.payload)
             let payload = AgentRegistry.agent(id: session.agentId)?.hookDialect.normalize(message.payload)
-            if payload?["hook_event_name"]?.stringValue == "Stop" { titleIfNeeded(session) }
+            let event = payload?["hook_event_name"]?.stringValue
+            let needsYouId = "needs-\(session.id)"
+            // An approval or a question is answered in the terminal (see `requests`); only tell the user.
+            if event == "PermissionRequest" || (event == "PreToolUse" && payload?["tool_name"]?.stringValue == "AskUserQuestion") {
+                let input = payload?["tool_input"] ?? .null
+                let body = event == "PermissionRequest"
+                    ? ToolClassifier.kind(name: payload?["tool_name"]?.stringValue ?? "tool", input: input).title
+                    : input["questions"]?[0]?["question"]?.stringValue ?? "The agent has a question."
+                notifyNeedsYou(id: needsYouId, heading: event == "PermissionRequest" ? "Approval needed" : "Question",
+                               body: body, session: session)
+            } else if ["PostToolUse", "UserPromptSubmit", "Stop", "SessionEnd"].contains(event) {
+                notifications.remove(id: needsYouId)
+            }
+            // No request outlives its turn: a hook still waiting then was cancelled, or answered in the terminal.
+            switch event {
+            case "UserPromptSubmit": requests.expire(sessionId: session.id, reason: "answered in the terminal")
+            case "Stop":
+                requests.expire(sessionId: session.id, reason: "turn ended")
+                titleIfNeeded(session)
+                if GeneralSettings.notifyTurnFinished(.standard), !isLooking(at: session.id) {
+                    notifications.post(id: "turn-\(session.id)", title: "Turn finished · \(session.displayTitle)",
+                                       body: "Ready for your next message.", sessionId: session.id, sound: false)
+                }
+            case "SessionEnd": requests.expire(sessionId: session.id, reason: "session ended")
+            default: break
+            }
         }
+    }
+
+    // MARK: requests
+
+    private func requestChanged(_ request: ActionRequestJSON) {
+        pendingRequests = requests.open
+        let id = "request-\(request.id)"
+        guard request.status == "pending" else { return notifications.remove(id: id) }
+        guard let session = sessions.first(where: { $0.id == request.sessionId }) else { return }
+        notifyNeedsYou(id: id, heading: "Policy check", body: request.title, session: session)
+    }
+
+    /// Unless turned off in General settings, or the user is looking at the session.
+    private func notifyNeedsYou(id: String, heading: String, body: String, session: SessionController) {
+        guard GeneralSettings.notifyNeedsYou(.standard), !isLooking(at: session.id) else { return }
+        notifications.post(id: id, title: "\(heading) · \(session.displayTitle)", body: body, sessionId: session.id)
+    }
+
+    /// The user has this session in front of them, so a notification would only interrupt.
+    private func isLooking(at sessionId: String) -> Bool {
+        NSApp.isActive && selectedId == sessionId
+    }
+
+    /// The card for the selected session's oldest open request.
+    func decisionCard(for sessionId: String) -> DecisionCardModel? {
+        guard let request = pendingRequests.first(where: { $0.sessionId == sessionId }) else { return nil }
+        let kind: DecisionCardModel.Kind = request.kind == "policy" ? .policy : request.kind == "question" ? .question : .permission
+        let questions = (request.input["questions"]?.arrayValue ?? []).map { question in
+            DecisionCardModel.Question(
+                text: question["question"]?.stringValue ?? "", header: question["header"]?.stringValue,
+                options: (question["options"]?.arrayValue ?? []).map {
+                    DecisionCardModel.Option(label: $0["label"]?.stringValue ?? "", detail: $0["description"]?.stringValue)
+                })
+        }
+        let detail = request.input["command"]?.stringValue ?? request.input["file_path"]?.stringValue ?? ""
+        // Codex takes no "ask", so handing a policy check back there would deny it.
+        let agentId = sessions.first { $0.id == sessionId }?.agentId
+        return DecisionCardModel(id: request.id, kind: kind, title: request.title, detail: detail, reason: request.reason,
+                                 questions: questions, canHandBack: agentId == ClaudeCodeAgent().id)
+    }
+
+    /// A card's answer. One answered elsewhere first (in the terminal, or after it timed out) is just gone.
+    /// Then the keyboard goes back to the session's terminal, so the user can type on without a click.
+    func answer(_ requestId: String, _ decision: RemoteDecision, forSession: Bool = false) {
+        let sessionId = pendingRequests.first { $0.id == requestId }?.sessionId
+        _ = try? requests.answer(requestId, decision: decision, forSession: forSession)
+        guard let view = sessions.first(where: { $0.id == sessionId })?.terminal.view else { return }
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
     }
 
     /// After a turn ends: once per session, a short AI title from its first prompt and the reply, unless it has a name.
@@ -309,5 +412,16 @@ final class AppModel {
             session.customName = title
             persistOpenSessions()
         }
+    }
+}
+
+/// Session id → agent, behind a lock, for the hook server's thread.
+final class SessionAgents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var agents: [String: any AgentKind] = [:]
+
+    subscript(id: String) -> (any AgentKind)? {
+        get { lock.lock(); defer { lock.unlock() }; return agents[id] }
+        set { lock.lock(); agents[id] = newValue; lock.unlock() }
     }
 }

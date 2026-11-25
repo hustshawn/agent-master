@@ -167,6 +167,40 @@ final class ClaudeCodeAgentTests: XCTestCase {
         XCTAssertNil(KiroAgent().hookOutput(for: permission, decision: .allow))
     }
 
+    // MARK: policy replies
+
+    private func policy(_ agent: any AgentKind, _ reply: PolicyReply) throws -> JSONValue?? {
+        try agent.policyHookOutput(reply).map { try $0.map { try JSONValue.parse(Data($0.utf8)) } }
+    }
+
+    func testClaudeTakesAllowDenyAndAskOnAPreToolUse() throws {
+        // The recorded Bash PreToolUse is the event these outputs answer.
+        let preToolUse = try XCTUnwrap(Fixtures.payloads("permission-request").first)
+        XCTAssertEqual(preToolUse["hook_event_name"], "PreToolUse")
+        XCTAssertEqual(try policy(ClaudeCodeAgent(), .allow),
+                       ["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": "allow"]])
+        XCTAssertEqual(try policy(ClaudeCodeAgent(), .deny(reason: "Over budget")),
+                       ["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                               "permissionDecisionReason": "Over budget"]])
+        XCTAssertEqual(try policy(ClaudeCodeAgent(), .handBack(reason: "Risky")),
+                       ["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                               "permissionDecisionReason": "Risky"]],
+                       "Claude Code's own approval prompt takes over")
+    }
+
+    func testCodexAllowsWithAnEmptyAnswerAndDeniesWhenHandedBack() throws {
+        XCTAssertEqual(try policy(CodexAgent(), .allow), .some(nil), "Codex rejects allow without updatedInput")
+        let denied: JSONValue = ["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                        "permissionDecisionReason": "Nobody answered"]]
+        XCTAssertEqual(try policy(CodexAgent(), .deny(reason: "Nobody answered")), denied)
+        XCTAssertEqual(try policy(CodexAgent(), .handBack(reason: "Nobody answered")), denied,
+                       "Codex takes no ask, and an empty answer would run the call")
+    }
+
+    func testKiroIsOutsideThePolicies() throws {
+        XCTAssertNil(try policy(KiroAgent(), .deny(reason: "x")), "its hooks block by exit code, which the shim never uses")
+    }
+
     // MARK: launch
 
     func testLaunchWritesHookSettingsAndCleansTheEnvironment() throws {

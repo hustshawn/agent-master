@@ -16,6 +16,9 @@ public final class ServerSession: @unchecked Sendable {
     private var translator: HookTranslator
     private var _state = SessionState()
     private var _customName: String?
+    /// Whether `_customName` was given in this run, by the user or the AI title. A name restored from the journal
+    /// may be the first prompt itself (see `snapshot`), which must not leave the server in a webhook.
+    private var nameIsOwn = false
     /// The user marked the last turn's result as reviewed; the next prompt clears it.
     private var _reviewed: Bool
     /// When the agent last did something (not counting status-line usage updates).
@@ -110,6 +113,7 @@ public final class ServerSession: @unchecked Sendable {
         lock.lock()
         guard _customName == nil else { return lock.unlock() }
         _customName = title
+        nameIsOwn = true
         lock.unlock()
         onChange?()
     }
@@ -123,6 +127,7 @@ public final class ServerSession: @unchecked Sendable {
         set {
             lock.lock()
             _customName = newValue
+            nameIsOwn = newValue != nil
             lock.unlock()
             onChange?()
         }
@@ -165,6 +170,20 @@ public final class ServerSession: @unchecked Sendable {
         lock.unlock()
         onChange?()
     }
+
+    /// What a webhook calls this session (ADR 0017): its rename or AI title, else its folder's name, never the
+    /// first prompt, which may hold paths, logs or secrets and would go to a third party.
+    var webhookName: String {
+        lock.lock()
+        let name = nameIsOwn ? _customName?.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        lock.unlock()
+        let folder = (projectPath as NSString).lastPathComponent
+        let text = name.flatMap { $0.isEmpty ? nil : $0 } ?? (folder.isEmpty || folder == "/" ? "Session" : folder)
+        let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
+        return line.count > Self.webhookNameLimit ? String(line.prefix(Self.webhookNameLimit)) + "…" : line
+    }
+
+    static let webhookNameLimit = 60
 
     public var json: SessionJSON {
         lock.lock()

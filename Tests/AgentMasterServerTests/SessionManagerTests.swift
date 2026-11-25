@@ -45,7 +45,7 @@ final class SessionManagerTests: XCTestCase {
                           "AGENTMASTER_CLAUDE_PATH": root.appendingPathComponent("bin/claude").path]
                 .merging(environment) { $1 },
             modelCatalog: modelCatalog,
-            pushTransport: pushes))
+            pushTransport: pushes, webhookTransport: posts))
         managers.append(manager)
         return manager
     }
@@ -62,6 +62,19 @@ final class SessionManagerTests: XCTestCase {
     }
 
     private let pushes = Pushes()
+
+    /// Records the webhook posts the manager sends.
+    private final class Posts: WebPushTransport, @unchecked Sendable {
+        private let lock = NSLock()
+        private var all: [(url: URL, headers: [String: String], body: String)] = []
+        func post(url: URL, headers: [String: String], body: Data) async throws -> Int {
+            lock.withLock { all.append((url, headers, String(decoding: body, as: UTF8.self))) }
+            return 200
+        }
+        var list: [(url: URL, headers: [String: String], body: String)] { lock.lock(); defer { lock.unlock() }; return all }
+    }
+
+    private let posts = Posts()
 
     private var project: String { SessionManager.realPath(root.appendingPathComponent("project").path) }
 
@@ -316,6 +329,166 @@ final class SessionManagerTests: XCTestCase {
         try manager.close(id: closed.id)
         Thread.sleep(forTimeInterval: 0.3)
         XCTAssertEqual(pushes.urgencies.count, 3, "closing a session is not news")
+    }
+
+    // MARK: policies
+
+    private func preToolUse(_ command: String) -> JSONValue {
+        ["hook_event_name": "PreToolUse", "session_id": "c1", "tool_name": "Bash", "tool_use_id": .string(UUID().uuidString),
+         "tool_input": ["command": .string(command)]]
+    }
+
+    func testAToolCallNothingObjectsToIsAnsweredAtOnceWithNoOutput() throws {
+        let manager = try makeManager()
+        let session = try manager.create(projectPath: project)
+        let started = Date()
+        let connection = try hook(manager, session.id, preToolUse("swift test"), kind: .request)
+        XCTAssertNil(try reply(connection))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+        XCTAssertEqual(manager.actionRequests, [])
+        XCTAssertTrue(wait { manager.list().first?.state.lastTool?.name == "Bash" }, "still reported as an event")
+    }
+
+    func testADangerousCommandWaitsForTheUser() throws {
+        let manager = try makeManager()
+        let events = Events()
+        _ = manager.subscribe { events.append($0) }
+        let session = try manager.create(projectPath: project)
+        func ask(_ decision: RemoteDecision) throws -> JSONValue? {
+            let connection = try hook(manager, session.id, preToolUse("rm -rf build"), kind: .request)
+            XCTAssertTrue(wait { manager.actionRequests.contains { $0.status == "pending" } })
+            let request = try XCTUnwrap(manager.actionRequests.first { $0.status == "pending" })
+            XCTAssertEqual(request.kind, "policy")
+            XCTAssertTrue(request.reason?.contains("looks dangerous") == true, request.reason ?? "")
+            XCTAssertEqual(manager.list().first?.status, "needsAttention")
+            try manager.answer(requestId: request.id, decision: decision)
+            return try reply(connection)?["hookSpecificOutput"]?["permissionDecision"]
+        }
+        XCTAssertEqual(try ask(.deny(message: "Not here", interrupt: false)), "deny")
+        XCTAssertEqual(try ask(.handBack), "ask", "Claude Code's own prompt takes over")
+        XCTAssertEqual(try ask(.allow), "allow")
+        XCTAssertTrue(events.list.contains { $0.type == "request" && $0.request?.kind == "policy" })
+    }
+
+    func testTheBudgetDeniesOnceASessionCostsTooMuch() throws {
+        let manager = try makeManager()
+        manager.policies = PolicySettings(cost: .init(denyAtUSD: 1))
+        let session = try manager.create(projectPath: project)
+        try hook(manager, session.id, ["model": ["display_name": "Opus"], "cost": ["total_cost_usd": 1.5]], kind: .statusline)
+        XCTAssertTrue(wait { manager.list().first?.state.usage?.costUSD == 1.5 })
+        let connection = try hook(manager, session.id, preToolUse("ls"), kind: .request)
+        let output = try reply(connection)?["hookSpecificOutput"]
+        XCTAssertEqual(output?["permissionDecision"], "deny")
+        XCTAssertEqual(manager.actionRequests, [], "a deny needs nobody")
+    }
+
+    func testAnOlderSettingsFileStillReadsAndOnlyItsOwnerCanReadIt() throws {
+        let url = root.appendingPathComponent("data/settings.json")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // As written before AI titles and policies existed.
+        try Data(#"{"options":{"agents.claude.model":"opus"},"recentProjects":[],"restoreSessionsOnLaunch":false}"#.utf8)
+            .write(to: url)
+        let manager = try makeManager()
+        XCTAssertEqual(manager.agents().first { $0.id == "claude" }?.defaultModel, "opus")
+        XCTAssertFalse(manager.restoreSessionsOnLaunch)
+        XCTAssertEqual(manager.policies, PolicySettings())
+        manager.policies = PolicySettings(maxToolCalls: 50)
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        manager.shutdown()
+        managers.removeAll()
+        XCTAssertEqual(try makeManager().policies.maxToolCalls, 50)
+    }
+
+    func testWebhooksHearOfRequestsAndTurnsWithoutTheirContent() throws {
+        let manager = try makeManager()
+        manager.notifications = NotificationSettings(webhooks: [.init(url: "https://ntfy.sh/secret-topic", format: "ntfy")],
+                                                     publicURL: "https://box.example",
+                                                     events: NotificationSettings.eventKinds)
+        XCTAssertEqual(manager.notifications.webhooks.first?.url, "https://ntfy.sh/••••", "read back masked")
+        let session = try manager.create(projectPath: project)
+        let connection = try hook(manager, session.id, permission, kind: .request)
+        XCTAssertTrue(wait { self.posts.list.count == 1 })
+        let post = try XCTUnwrap(posts.list.first)
+        XCTAssertEqual(post.url.absoluteString, "https://ntfy.sh/secret-topic")
+        XCTAssertEqual(post.headers["Click"], "https://box.example/#session=\(session.id)")
+        XCTAssertFalse(post.body.contains("swift test") || (post.headers["Title"] ?? "").contains("swift test"),
+                       "no command text leaves the server")
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1", "last_assistant_message": "secret"])
+        XCTAssertTrue(wait { self.posts.list.count == 2 })
+        XCTAssertFalse(posts.list[1].body.contains("secret"))
+        _ = try reply(connection)
+        // A masked URL sent back keeps the stored one.
+        manager.notifications = manager.notifications
+        manager.shutdown()
+        managers.removeAll()
+        let data = try String(contentsOf: root.appendingPathComponent("data/settings.json"), encoding: .utf8)
+        XCTAssertTrue(data.contains("secret-topic"), "the stored URL survived the masked round trip")
+    }
+
+    /// By default a finished turn posts nothing; the next event of a kind that is on does.
+    func testWebhooksPostOnlyTheChosenEvents() throws {
+        let manager = try makeManager()
+        manager.notifications = NotificationSettings(webhooks: [.init(url: "https://hooks.example/x", format: "json")])
+        let session = try manager.create(projectPath: project)
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1"])
+        let connection = try hook(manager, session.id, permission, kind: .request)
+        XCTAssertTrue(wait { self.posts.list.count == 1 })
+        XCTAssertTrue(posts.list[0].body.contains(#""kind":"approval""#), posts.list[0].body)
+        manager.notifications = NotificationSettings(webhooks: manager.notifications.webhooks, events: ["turn"])
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1"])
+        XCTAssertTrue(wait { self.posts.list.count == 2 })
+        XCTAssertTrue(posts.list[1].body.contains(#""kind":"turn""#), posts.list[1].body)
+        _ = try reply(connection)   // the turn's end expired the approval
+    }
+
+    /// The first prompt can hold secrets; webhooks go through third parties (review of #19, B2).
+    func testWebhooksNameASessionWithoutItsFirstPrompt() throws {
+        let manager = try makeManager()
+        manager.notifications = NotificationSettings(webhooks: [.init(url: "https://hooks.example/x", format: "json")],
+                                                     events: NotificationSettings.eventKinds)
+        let session = try manager.create(projectPath: project)
+        try hook(manager, session.id, ["hook_event_name": "UserPromptSubmit", "session_id": "c1",
+                                       "prompt": "deploy with token sk-secret-123 please"])
+        XCTAssertTrue(wait { manager.list().first?.state.firstPrompt != nil })
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1"])
+        XCTAssertTrue(wait { self.posts.list.count == 1 })
+        let first = try XCTUnwrap(posts.list.first)
+        XCTAssertFalse(first.body.contains("sk-secret"), first.body)
+        XCTAssertTrue(first.body.contains("Turn finished · project"), "the folder's name stands in: \(first.body)")
+        // A restored name may be the first prompt (the journal keeps it as the title): not used either.
+        let restored = try manager.create(projectPath: project, title: "sk-secret-456 in the restored title")
+        try hook(manager, restored.id, ["hook_event_name": "Stop", "session_id": "c2"])
+        XCTAssertTrue(wait { self.posts.list.count == 2 })
+        XCTAssertFalse(posts.list[1].body.contains("sk-secret"), posts.list[1].body)
+        // A name the user gives is.
+        try manager.rename(id: session.id, to: "Release")
+        try hook(manager, session.id, ["hook_event_name": "Stop", "session_id": "c1"])
+        XCTAssertTrue(wait { self.posts.list.count == 3 })
+        XCTAssertTrue(posts.list[2].body.contains("Turn finished · Release"), posts.list[2].body)
+    }
+
+    /// The agents a stopping server ends did not quit by themselves: no "Agent exited" for each of them.
+    func testShuttingDownPostsNoExitForTheSessionsItStops() throws {
+        let manager = try makeManager()
+        manager.notifications = NotificationSettings(webhooks: [.init(url: "https://hooks.example/x", format: "json")])
+        let session = try manager.create(projectPath: project)
+        let process = try XCTUnwrap(manager.session(id: session.id)).process
+        manager.shutdown()
+        XCTAssertTrue(wait { process.hasExited })
+        XCTAssertFalse(wait(1) { !self.posts.list.isEmpty }, "posted: \(posts.list.map(\.body))")
+    }
+
+    /// Stopping releases waiting hooks with no output, which Codex reads as "run it" (review of #19, S1).
+    func testShuttingDownDeniesACodexPolicyCheckInsteadOfLettingItRun() throws {
+        try script("bin/codex", "#!/bin/sh\nexec cat\n")
+        let manager = try makeManager(["AGENTMASTER_CODEX_PATH": root.appendingPathComponent("bin/codex").path])
+        let session = try manager.create(projectPath: project, agentId: "codex")
+        let connection = try hook(manager, session.id, preToolUse("rm -rf build"), kind: .request)
+        XCTAssertTrue(wait { manager.actionRequests.contains { $0.kind == "policy" && $0.status == "pending" } })
+        manager.shutdown()
+        managers.removeAll()
+        XCTAssertEqual(try reply(connection)?["hookSpecificOutput"]?["permissionDecision"], "deny")
     }
 
     func testAgentsListTheModelsTheAgentsReported() throws {

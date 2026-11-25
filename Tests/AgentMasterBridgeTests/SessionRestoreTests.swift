@@ -132,6 +132,18 @@ final class SessionRestoreTests: XCTestCase {
 
     // MARK: general settings
 
+    func testPoliciesRoundTripInDefaultsAndDefaultToTheDangerousCommandRule() {
+        let suite = "am-policies-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(GeneralSettings.policies(defaults), PolicySettings())
+        let policies = PolicySettings(cost: .init(askAtUSD: 5, denyAtUSD: 20), maxToolCalls: 100)
+        GeneralSettings.setPolicies(policies, defaults)
+        XCTAssertEqual(GeneralSettings.policies(defaults), policies)
+        defaults.set("not json", forKey: GeneralSettings.policiesKey)
+        XCTAssertEqual(GeneralSettings.policies(defaults), PolicySettings())
+    }
+
     func testRestoreOnLaunchDefaultsOn() {
         let suite = "am-general-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

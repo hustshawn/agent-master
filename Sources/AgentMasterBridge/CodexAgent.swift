@@ -111,6 +111,19 @@ public struct CodexAgent: AgentKind {
         preferences.bool(Self.hooksOption, default: true)
     }
 
+    /// Codex's PreToolUse takes only "deny" (ADR 0017): an "allow" without
+    /// `updatedInput`, or "ask", counts as a failed hook and the call runs. So an allow is an empty answer,
+    /// which leaves Codex's own approval in place, and a hand-back denies: nobody confirmed the call.
+    public func policyHookOutput(_ reply: PolicyReply) -> String?? {
+        switch reply {
+        case .allow:
+            return .some(nil)
+        case .deny(let reason), .handBack(let reason):
+            return ClaudeCodeAgent.encode(["hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": .string(reason)])
+        }
+    }
+
     public func hookArguments(for plan: HookPlan) throws -> [String] {
         Self.hookArguments(command: plan.command)
     }

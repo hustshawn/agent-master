@@ -14,6 +14,56 @@ public enum GeneralSettings {
     public static func aiSessionTitles(_ defaults: UserDefaults) -> Bool {
         defaults.object(forKey: aiSessionTitlesKey) as? Bool ?? true
     }
+
+    /// Mac notifications (ADR 0017) when a session you are not looking at needs you: an approval, a question
+    /// or a policy check. On by default.
+    public static let notifyNeedsYouKey = "notifyNeedsYou"
+
+    public static func notifyNeedsYou(_ defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: notifyNeedsYouKey) as? Bool ?? true
+    }
+
+    /// Mac notifications when such a session finishes a turn, without sound. Off by default: with many
+    /// sessions they come often.
+    public static let notifyTurnFinishedKey = "notifyTurnFinished"
+
+    public static func notifyTurnFinished(_ defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: notifyTurnFinishedKey) as? Bool ?? false
+    }
+
+    /// The policy rules (ADR 0017), as the JSON the server keeps under the same key in settings.json.
+    public static let policiesKey = "policies"
+
+    /// Read on every tool call, so the decoded value is kept until the stored text changes.
+    public static func policies(_ defaults: UserDefaults) -> PolicySettings {
+        let raw = defaults.string(forKey: policiesKey)
+        return policiesCache.value(for: raw) {
+            raw.flatMap { try? JSONDecoder().decode(PolicySettings.self, from: Data($0.utf8)) } ?? PolicySettings()
+        }
+    }
+
+    private static let policiesCache = DecodedCache()
+
+    private final class DecodedCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var raw: String??
+        private var value = PolicySettings()
+
+        func value(for raw: String?, decode: () -> PolicySettings) -> PolicySettings {
+            lock.lock()
+            defer { lock.unlock() }
+            if self.raw != .some(raw) {
+                value = decode()
+                self.raw = .some(raw)
+            }
+            return value
+        }
+    }
+
+    public static func setPolicies(_ policies: PolicySettings, _ defaults: UserDefaults) {
+        guard let data = try? JSONEncoder().encode(policies) else { return }
+        defaults.set(String(decoding: data, as: UTF8.self), forKey: policiesKey)
+    }
 }
 
 /// What the app knows about one open session when it writes the journal.

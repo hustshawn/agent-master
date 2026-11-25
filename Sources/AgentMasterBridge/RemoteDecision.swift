@@ -9,4 +9,17 @@ public enum RemoteDecision: Equatable, Sendable {
     case deny(message: String, interrupt: Bool)
     /// AskUserQuestion: each question's text mapped to the chosen label (labels joined by ", " for multi-select).
     case answer([String: String])
+    /// "Answer in the terminal": the agent's own UI decides; for a policy request, see PolicyReply.handBack.
+    case handBack
+}
+
+/// How a PreToolUse the policy rules stopped is answered (ADR 0017).
+public enum PolicyReply: Equatable, Sendable {
+    /// The user allowed it (an ASK), or nothing objected.
+    case allow
+    /// A rule denied it, or the user did; `reason` goes back to the model.
+    case deny(reason: String)
+    /// Nobody answered in AgentMaster (the terminal was chosen, it timed out or it expired): the agent's own
+    /// approval decides where it can, else the call is denied, since an empty answer would let it run.
+    case handBack(reason: String)
 }

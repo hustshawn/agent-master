@@ -30,11 +30,12 @@ final class HookShimTests: XCTestCase {
         XCTAssertEqual(HookShim.defaultDecisionTimeout, 590)
     }
 
-    func testOnlyAskUserQuestionPreToolUseIsADecision() {
+    func testEveryPreToolUseAndPermissionRequestIsADecision() {
         XCTAssertTrue(HookShim.isDecision(["hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion"]))
         XCTAssertTrue(HookShim.isDecision(["hook_event_name": "PermissionRequest", "tool_name": "Bash"]))
-        XCTAssertFalse(HookShim.isDecision(["hook_event_name": "PreToolUse", "tool_name": "Bash"]))
+        XCTAssertTrue(HookShim.isDecision(["hook_event_name": "PreToolUse", "tool_name": "Bash"]), "the policy rules check it")
         XCTAssertFalse(HookShim.isDecision(["hook_event_name": "PostToolUse", "tool_name": "AskUserQuestion"]))
+        XCTAssertFalse(HookShim.isDecision(["hook_event_name": "Stop"]))
     }
 
     func testMismatchedReplyIdPrintsNothing() {

@@ -40,6 +40,9 @@ public protocol AgentKind: Sendable {
     /// The hook output that carries `decision` for the request `payload`, or nil when this agent's requests
     /// are answered in its terminal only (or `decision` does not fit the request).
     func hookOutput(for payload: JSONValue, decision: RemoteDecision) -> String?
+    /// The PreToolUse output that carries a policy result: `.some(nil)` is an empty answer (the agent decides),
+    /// nil means this agent's hooks cannot stop a call, so the policy rules do not apply to it.
+    func policyHookOutput(_ reply: PolicyReply) -> String??
 
     /// Whether to inject AgentMaster's hooks into this launch.
     func hooksEnabled(preferences: AgentPreferences) -> Bool
@@ -80,6 +83,7 @@ extension AgentKind {
     public func transcript(at path: String) -> [TranscriptEntry] { [] }
     public func toolKind(name: String, input: JSONValue) -> ToolKind { ToolClassifier.kind(name: name, input: input) }
     public func hookOutput(for payload: JSONValue, decision: RemoteDecision) -> String? { nil }
+    public func policyHookOutput(_ reply: PolicyReply) -> String?? { nil }
 
     /// Resume the conversation the hooks reported, as long as its transcript is still on disk.
     public func resumeId(from state: SessionState) -> String? {

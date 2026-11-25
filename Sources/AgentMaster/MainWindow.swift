@@ -1,6 +1,7 @@
 import SwiftUI
 import AgentMasterUI
 import TerminalKit
+import AgentMasterBridge
 
 struct MainWindow: View {
     @Bindable var model: AppModel
@@ -29,6 +30,19 @@ struct MainWindow: View {
                     TerminalHost(session: session.terminal)
                         .id(session.id)
                         .padding(EdgeInsets(top: 6, leading: 14, bottom: 10, trailing: 0))
+                        .overlay(alignment: .bottom) {
+                            if let card = model.decisionCard(for: session.id) {
+                                DecisionOverlay(
+                                    card: card,
+                                    onAllow: { model.answer(card.id, .allow) },
+                                    onAllowForSession: { model.answer(card.id, .allow, forSession: true) },
+                                    onDeny: { model.answer(card.id, .deny(message: $0.isEmpty ? "The user denied this." : $0,
+                                                                          interrupt: false)) },
+                                    onAnswer: { model.answer(card.id, .answer($0)) },
+                                    onTerminal: { model.answer(card.id, .handBack) })
+                                    .id(card.id)
+                            }
+                        }
                 }
                 .frame(minWidth: 520)
 

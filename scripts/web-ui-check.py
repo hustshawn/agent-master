@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Drives the web UI in headless Chromium against agentmaster-server and the real Claude Code, and saves a
 screenshot of each step. Covers: token login, new session, typing into the agent's terminal, the inspector's
-file change, Settings, rename, reload (sessions and terminal come back), close.
+file change, a policy card shown and dismissed by denying it, Settings, rename, reload (sessions and terminal
+come back), close.
 
 Usage: uv run --with playwright scripts/web-ui-check.py [--out /tmp/ui-shots]
        (first time: uv run --with playwright python -m playwright install chromium)
@@ -97,6 +98,20 @@ def main():
                     page.click(".change summary")
                     assert page.inner_text(".change summary").startswith("app.py"), "the change is not relative to the project"
                 shot("4-session")
+
+                step = "a policy card"   # ADR 0017: rm -rf waits on a card, which goes once answered
+                os.makedirs(os.path.join(work, "doomed"), exist_ok=True)
+                page.click(".term-pane:not([hidden])")
+                time.sleep(0.5)
+                page.keyboard.type("Run this exact shell command once: `rm -rf doomed`. If it is blocked, do not retry.")
+                page.keyboard.press("Enter")
+                page.wait_for_selector("#decision-area:not([hidden]) .policy-card", timeout=120000)
+                assert "looks dangerous" in page.inner_text(".policy-card"), "the card does not say why it asks"
+                shot("4b-policy-card")
+                page.click("#decision-footer button:has-text('Deny')")
+                page.wait_for_selector("#decision-area", state="hidden", timeout=10000)
+                assert os.path.isdir(os.path.join(work, "doomed")), "rm -rf ran although it was denied"
+                page.wait_for_function("document.querySelector('.row-item .glyph')?.innerText === '◇'", timeout=240000)
 
                 step = "settings"
                 page.click("#open-settings")

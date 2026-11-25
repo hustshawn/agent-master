@@ -97,8 +97,17 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
      **没有花费数据的 agent**（`reportsUsage == false`，即 Codex 和 Kiro）这条规则返回 ALLOW，Settings 里注明，不会因为没有数据就拒绝。
   2. **危险 Bash 命令**：检查 `tool_name == "Bash"` 的 `tool_input.command`（Claude 和 Codex 都叫 `Bash`），
      命中就 ASK，没有记忆，每次都问。默认打开（会导致 `rm -rf node_modules` 这类日常命令也问），
-     所以 policy 卡上有 **"本会话内允许"**：选了以后，这次询问的规则在该会话里不再 ASK（存在 `PolicyState.allowedRules`，
-     跟会话一起没）；会 DENY 的规则（花费上限）照样 DENY。Web 端是 `POST /api/requests/{id}` 带 `"scope": "session"`。
+     所以 policy 卡上有 **"本会话内允许"**，按规则分两种范围（跟会话一起没）：
+     - 预算和调用次数上限：整条规则在该会话里不再 ASK（`PolicyState.allowedRules`）。
+     - 危险命令：只放行这次命中的那一类（`PolicyFinding.sessionKey`，即 `DangerousCommand.finding` 返回的字符串，
+       比如 `rm with -r and -f`；用户自定义 pattern 是 `pattern: <正则>`），记在 `PolicyState.allowedDangerousFindings`。
+       允许了 `rm -rf build` 之后，`rm -rf node_modules` 不再问，但 `git push --force`、`terraform destroy`、
+       `curl … | bash`、`DROP DATABASE` 照样问（复审：原来整条规则关掉，这些都会直接放行）。
+       "命令太长/检查超时"这类没有 key，每次都问。按钮提示写明只覆盖这一类命令。
+     - 会 DENY 的规则（花费上限）照样 DENY。
+     Web 端是 `POST /api/requests/{id}` 带 `"scope": "session"`，线上格式没变：放行哪一类由服务端从这次检查的
+     finding 里取（`HookRequestRouter` 把整个 `PolicyCheck` 交给 `PolicyBook.approve`），不经客户端传，旧客户端照常用。
+     Mac 端走同一个 `ActionRequestStore.answer(forSession:)`。
      - **内置检查不用正则**（`DangerousCommand`）：先在没有引号包住的换行、`;`、`|`、`||`、`&`、`&&` 处把命令切成简单命令，
        再把每段分成词，去掉引号，跳过 `VAR=x` 前缀和 `sudo`、`env`、`xargs` 之类的外壳，最后按命令名判断。
        整个过程是一遍线性扫描，几十 KB 的 heredoc 也不会拖住 accept 线程（PR #19 评审 B1：原来的正则在 90 KB 命令上回溯了 98 s）。

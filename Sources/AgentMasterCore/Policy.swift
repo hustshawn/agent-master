@@ -19,11 +19,16 @@ public struct PolicyFinding: Equatable, Sendable {
     public let rule: PolicyRule
     public let verdict: PolicyVerdict
     public let reason: String
+    /// For the dangerous-command rule, which kind of command it found (`DangerousCommand.finding`, or the
+    /// user's pattern that matched): "Allow for this session" allows only that kind. Nil when the finding
+    /// cannot be allowed for the session (a command too long or too slow to check).
+    public let sessionKey: String?
 
-    public init(rule: PolicyRule, verdict: PolicyVerdict, reason: String) {
+    public init(rule: PolicyRule, verdict: PolicyVerdict, reason: String, sessionKey: String? = nil) {
         self.rule = rule
         self.verdict = verdict
         self.reason = reason
+        self.sessionKey = sessionKey
     }
 }
 
@@ -120,8 +125,11 @@ public struct PolicyState: Equatable, Sendable {
     /// Calls allowed before the call limit asks again; nil means `maxToolCalls`.
     public var toolCallAllowance: Int?
     /// Rules the user allowed for the rest of the session ("Allow for this session"): they no longer ask.
-    /// A rule that denies (the cost limit) still denies.
+    /// A rule that denies (the cost limit) still denies. Only the budget and the call limit go here.
     public var allowedRules: Set<PolicyRule> = []
+    /// Kinds of dangerous command (`PolicyFinding.sessionKey`) allowed for the rest of the session; any other
+    /// dangerous command still asks.
+    public var allowedDangerousFindings: Set<String> = []
 
     public init() {}
 
@@ -155,10 +163,11 @@ public enum PolicyReducer {
             }
         }
 
-        if settings.dangerousBash.enabled, !state.allowedRules.contains(.dangerousBash), toolName == "Bash",
-           let command = input["command"]?.stringValue,
-           let reason = dangerousReason(command, patterns: settings.dangerousBash.patterns) {
-            findings.append(PolicyFinding(rule: .dangerousBash, verdict: .ask, reason: reason))
+        if settings.dangerousBash.enabled, toolName == "Bash", let command = input["command"]?.stringValue,
+           let found = dangerousFinding(command, patterns: settings.dangerousBash.patterns),
+           !(found.key.map(state.allowedDangerousFindings.contains) ?? false) {
+            findings.append(PolicyFinding(rule: .dangerousBash, verdict: .ask, reason: found.reason,
+                                          sessionKey: found.key))
         }
 
         state.toolCalls += 1
@@ -171,11 +180,22 @@ public enum PolicyReducer {
     }
 
     /// The user allowed a call the rules asked about: the budget stops asking, and the call limit lets this
-    /// call and `maxToolCalls` more through. A dangerous command has no memory; the next one asks again,
-    /// unless `forSession`, which stops every rule in `rules` asking for the rest of the session.
-    public static func approve(_ rules: [PolicyRule], forSession: Bool = false, settings: PolicySettings,
+    /// call and `maxToolCalls` more through. A dangerous command has no memory; the next one asks again.
+    /// `forSession` stops the budget and the call limit asking for the rest of the session, and for the
+    /// dangerous-command rule only the kind of command it found (`rm with -r and -f`), not every kind.
+    public static func approve(_ check: PolicyCheck, forSession: Bool = false, settings: PolicySettings,
                                state: inout PolicyState) {
-        if forSession { state.allowedRules.formUnion(rules) }
+        let asking = check.findings.filter { $0.verdict == .ask }
+        let rules = asking.map(\.rule)
+        if forSession {
+            for finding in asking {
+                if finding.rule == .dangerousBash {
+                    if let key = finding.sessionKey { state.allowedDangerousFindings.insert(key) }
+                } else {
+                    state.allowedRules.insert(finding.rule)
+                }
+            }
+        }
         if rules.contains(.cost) { state.budgetApproved = true }
         if rules.contains(.maxToolCalls), let max = settings.maxToolCalls {
             state.toolCallAllowance = state.toolCalls + max
@@ -192,18 +212,24 @@ public enum PolicyReducer {
 
     /// Why a Bash command needs the user's OK, or nil: the built-in checks, then the user's patterns.
     public static func dangerousReason(_ command: String, patterns: [String]) -> String? {
+        dangerousFinding(command, patterns: patterns)?.reason
+    }
+
+    /// The reason, and the kind of command for "Allow for this session" (nil when it cannot be allowed).
+    static func dangerousFinding(_ command: String, patterns: [String]) -> (reason: String, key: String?)? {
         guard command.utf8.count <= maxCommandLength else {
-            return "The command is too long to check (\(command.utf8.count / 1000) KB)."
+            return ("The command is too long to check (\(command.utf8.count / 1000) KB).", nil)
         }
-        if let found = DangerousCommand.finding(in: command) { return "The command looks dangerous: \(found)." }
+        if let found = DangerousCommand.finding(in: command) { return ("The command looks dangerous: \(found).", found) }
         guard !patterns.isEmpty else { return nil }
         let segments = DangerousCommand.split(command).map(\.text)
         if segments.contains(where: { $0.utf8.count > maxPatternInputLength }) {
-            return "A command is too long for your dangerous-command patterns to check."
+            return ("A command is too long for your dangerous-command patterns to check.", nil)
         }
         switch PatternMatcher.firstMatch(segments, patterns: patterns, timeout: patternTimeout) {
-        case .match(let pattern): return "The command matches your dangerous-command pattern: \(pattern)"
-        case .timedOut: return "Your dangerous-command patterns took too long to check this command."
+        case .match(let pattern):
+            return ("The command matches your dangerous-command pattern: \(pattern)", "pattern: \(pattern)")
+        case .timedOut: return ("Your dangerous-command patterns took too long to check this command.", nil)
         case .none: return nil
         }
     }

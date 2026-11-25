@@ -1127,7 +1127,7 @@ function policyFooter(request) {
   return [
     el("div", { class: "button-row" },
       el("button", { class: "primary", type: "button", onclick: () => decide(request.id, { behavior: "allow" }) }, "Allow"),
-      el("button", { type: "button", title: "The rule that asked stops asking in this session",
+      el("button", { type: "button", title: "Stops asking about this kind of command (or this limit) in this session only; other dangerous commands still ask",
                      onclick: () => decide(request.id, { behavior: "allow", scope: "session" }) }, "Allow for this session"),
       el("button", { type: "button", onclick: () => decide(request.id,
           { behavior: "deny", message: (state.answerNotes.get(request.id) ?? "").trim() || undefined }) }, "Deny"),

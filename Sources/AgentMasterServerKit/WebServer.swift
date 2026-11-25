@@ -29,8 +29,8 @@ import AgentMasterBridge
 ///     GET    /api/requests                             open and recently resolved approvals and questions
 ///     POST   /api/requests/{id}                        {"behavior": "allow"|"deny", "message"?} or {"answers": {question: label}},
 ///                                                      or {"behavior": "terminal"}: the agent's own UI decides (ADR 0017);
-///                                                      "scope": "session" with allow stops a policy check's rules
-///                                                      asking again in that session;
+///                                                      "scope": "session" with allow stops that kind of dangerous
+///                                                      command (or the limit) asking again in that session;
 ///                                                      ActionRequestJSON (409 once answered or expired)
 ///     PUT    /api/policies                             PolicySettings: replaces the policy rules
 ///     PUT    /api/notifications                        NotificationSettings: webhooks and publicURL; a webhook

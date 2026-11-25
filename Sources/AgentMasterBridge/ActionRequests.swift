@@ -149,7 +149,8 @@ public final class ActionRequestStore: @unchecked Sendable {
         return request
     }
 
-    /// `forSession` with `.allow` on a policy request: its rules stop asking for the rest of the session.
+    /// `forSession` with `.allow` on a policy request: that kind of dangerous command, or the limit, stops asking
+    /// for the rest of the session (`PolicyReducer.approve`).
     @discardableResult
     public func answer(_ id: String, decision: RemoteDecision, forSession: Bool = false) throws -> ActionRequestJSON {
         let outcome: String

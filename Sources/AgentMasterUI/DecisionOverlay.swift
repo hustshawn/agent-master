@@ -55,7 +55,7 @@ public struct DecisionCardModel: Identifiable, Equatable {
 public struct DecisionOverlay: View {
     let card: DecisionCardModel
     let onAllow: () -> Void
-    /// "Allow for this session" on a policy check: the rule that asked stops asking in this session.
+    /// "Allow for this session" on a policy check: this kind of dangerous command, or the limit, stops asking in this session.
     let onAllowForSession: () -> Void
     let onDeny: (String) -> Void
     let onAnswer: ([String: String]) -> Void
@@ -112,7 +112,7 @@ public struct DecisionOverlay: View {
                     Button("Allow", action: onAllow)
                     if card.kind == .policy {
                         Button("Allow for this session", action: onAllowForSession)
-                            .help("The rule that asked stops asking in this session.")
+                            .help("Stops asking about this kind of command (or this limit) in this session only; other dangerous commands still ask.")
                     }
                     Button("Deny", action: deny)
                 }

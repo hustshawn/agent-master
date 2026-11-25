@@ -170,7 +170,7 @@ final class ActionRequestStoreTests: XCTestCase {
         XCTAssertEqual(route(permission, agent: CodexAgent(), store: store).0.list, [nil], "Codex approves in its terminal")
     }
 
-    /// Review of #19 on a Mac, item 3: "Allow for this session" stops the dangerous-command rule asking in that
+    /// Review of #19 on a Mac, item 3: "Allow for this session" stops that kind of dangerous command asking in that
     /// session only; a plain allow does not.
     func testAllowForThisSessionStopsTheRuleAskingInThatSession() throws {
         let policies = PolicyBook()
@@ -183,6 +183,10 @@ final class ActionRequestStoreTests: XCTestCase {
         let (replies, third) = route(dangerous, policies: policies, store: store)
         XCTAssertEqual(third, [])
         XCTAssertEqual(replies.list, [nil], "answered at once")
+        let forcePush: JSONValue = ["hook_event_name": "PreToolUse", "tool_name": "Bash",
+                                    "tool_input": ["command": "git push --force"]]
+        XCTAssertEqual(route(forcePush, policies: policies, store: store).1.map(\.kind), ["policy"],
+                       "another kind of dangerous command still asks")
         var other: [ActionRequestJSON] = []
         HookRequestRouter.route(sessionId: "s2", payload: dangerous, reply: { _ in }, agent: ClaudeCodeAgent(),
                                 settings: PolicySettings(), policies: policies, requests: store, remote: true) { other.append($0) }

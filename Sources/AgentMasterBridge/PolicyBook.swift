@@ -29,9 +29,9 @@ public final class PolicyBook: @unchecked Sendable {
         sync { PolicyReducer.observeCost(cost, in: &$0[sessionId, default: PolicyState()]) }
     }
 
-    public func approve(_ rules: [PolicyRule], forSession: Bool = false, sessionId: String, settings: PolicySettings) {
+    public func approve(_ check: PolicyCheck, forSession: Bool = false, sessionId: String, settings: PolicySettings) {
         sync {
-            PolicyReducer.approve(rules, forSession: forSession, settings: settings,
+            PolicyReducer.approve(check, forSession: forSession, settings: settings,
                                   state: &$0[sessionId, default: PolicyState()])
         }
     }
@@ -71,11 +71,10 @@ public enum HookRequestRouter {
             case .deny:
                 return reply(agent.policyHookOutput(.deny(reason: check.reason)) ?? nil)
             case .ask:
-                let rules = check.askingRules
                 if let request = requests.openPolicy(
                     sessionId: sessionId, agent: agent, payload: payload, reason: check.reason,
                     onAllow: { forSession in
-                        policies.approve(rules, forSession: forSession, sessionId: sessionId, settings: settings)
+                        policies.approve(check, forSession: forSession, sessionId: sessionId, settings: settings)
                     },
                     reply: reply) {
                     opened(request)

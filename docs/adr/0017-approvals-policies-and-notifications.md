@@ -45,11 +45,14 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
 - `ActionRequestStore` 和 `ActionRequestJSON` 从 ServerKit 挪到 Bridge，Mac App 和服务端用同一个挂起表：
   先答者生效、到点自己回复、`expire` 回落、记最近 100 条结果。
 - 请求的种类在 permission、question 之外加 **policy**（见 2），带上策略给的理由（`reason`）。
-- **到点怎么回**由开表的一方定：服务端照 ADR 0013 等 580 s，回 deny 并打断（用户可能不在电脑前）；Mac App 的审批和提问
-  只等 30 s，然后回空输出，交回终端。等这么短，是因为 hook 挂着时 Claude Code 可能不画自己的审批框：用户没看到浮层的话，
-  终端就像卡住了（PR #19 评审 S5）。这一点还没在真机上验证，验证后可以放长。策略 ASK 两端都等 580 s，到点回复见下表。
-- **Mac App**：终端区底部的浮层。审批卡：允许、拒绝、在终端处理；提问卡：按 `questions` 渲染选项，点一个就答。
-  "始终允许（写入 `permission_suggestions`）"和多选不进第一版。
+- **到点怎么回**由开表的一方定：服务端照 ADR 0013 等 580 s，回 deny 并打断（用户可能不在电脑前）。策略 ASK 两端都等 580 s，到点回复见下表。
+- **Mac App 不给审批和提问出卡片**（2026-11-25 真机实测后改定，S5 结案）：hook 挂着时 Claude Code 会在终端里照常画自己的审批框，
+  浮层只是重复一遍，而且在终端里答了以后卡片还挂着，直到这一轮结束。所以 Mac 用 `remote: false` 路由：
+  `PermissionRequest` 和 AskUserQuestion 当场回空输出，由终端作答，App 只发一条"需要你"的通知。
+  policy 卡照旧（bypass 模式下终端只显示 "Waiting…"，必须有卡片）。
+- **Mac App 的 policy 卡**：终端区底部的浮层，按钮有允许、本会话内允许、拒绝、在终端处理（仅 Claude）。命令只显示一次。
+  没有按钮占用回车：在拒绝理由框里按回车就是拒绝，不会误放行（真机评审第 1 条）。答完后键盘焦点回到终端。
+  "始终允许（写入 `permission_suggestions`）"不进第一版。
 - **Web 版**：沿用已有卡片和 `POST /api/requests/{id}`。`behavior` 多一个 `"terminal"`，意思是"交给 agent 自己决定"：
   审批和提问回空输出，policy 卡见下表。
 - **Codex 和 Kiro 的 `PermissionRequest` 仍在终端里审批**（跟 0013 一样），要先录 0.160 的 fixture，见待定问题。
@@ -93,13 +96,16 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
      预算按整个 AgentMaster 会话算。statusLine 比工具调用晚一点，数字最多落后一轮，设置说明里写明。
      **没有花费数据的 agent**（`reportsUsage == false`，即 Codex 和 Kiro）这条规则返回 ALLOW，Settings 里注明，不会因为没有数据就拒绝。
   2. **危险 Bash 命令**：检查 `tool_name == "Bash"` 的 `tool_input.command`（Claude 和 Codex 都叫 `Bash`），
-     命中就 ASK，没有记忆，每次都问。
+     命中就 ASK，没有记忆，每次都问。默认打开（会导致 `rm -rf node_modules` 这类日常命令也问），
+     所以 policy 卡上有 **"本会话内允许"**：选了以后，这次询问的规则在该会话里不再 ASK（存在 `PolicyState.allowedRules`，
+     跟会话一起没）；会 DENY 的规则（花费上限）照样 DENY。Web 端是 `POST /api/requests/{id}` 带 `"scope": "session"`。
      - **内置检查不用正则**（`DangerousCommand`）：先在没有引号包住的换行、`;`、`|`、`||`、`&`、`&&` 处把命令切成简单命令，
        再把每段分成词，去掉引号，跳过 `VAR=x` 前缀和 `sudo`、`env`、`xargs` 之类的外壳，最后按命令名判断。
        整个过程是一遍线性扫描，几十 KB 的 heredoc 也不会拖住 accept 线程（PR #19 评审 B1：原来的正则在 90 KB 命令上回溯了 98 s）。
      - 覆盖范围：`rm` 同时带 r 和 f（含 `-rf`、拆开写、`--recursive --force`、加引号）；`git push` 的 `-f`/`--force*`、`+refspec`、
        `:ref`、`-d`/`--delete`、`--mirror`（合写的短参数会拆开，比如 `-uf`）；`git reset --hard`；`git clean -f`/`--force`（`-n` 除外）；
-       `terraform apply|destroy`；`kubectl delete`；`DROP TABLE|DATABASE`；`mkfs*`；`dd of=/dev/`；`chmod -R 777`（参数顺序不限）；
+       `terraform apply|destroy`；`kubectl delete`；`DROP TABLE|DATABASE`（只是 `grep`、`rg`、`echo`、`cat` 这类搜索或打印命令的参数时不算，
+       除非它的输出又通过管道交给别的命令，比如 `echo … | psql`；`git` 只按子命令判断，`git log --grep` 不会命中）；`mkfs*`；`dd of=/dev/`；`chmod -R 777`（参数顺序不限）；
        `curl|wget … | [sudo …] sh`、`bash <(curl …)`、`sh -c "$(curl …)"`；`bash -c '…'` 里的内容递归检查。
      - **用户自己的正则**是另加的（默认为空），对每段简单命令匹配。为防写坏的正则卡死 hook 线程：编译结果缓存；
        单段超过 4 KB 不跑，直接 ASK；全部模式最多跑 100 ms，超时也 ASK。整条命令超过 1 MB 时不检查，直接 ASK。
@@ -119,7 +125,9 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
 ### 3. 需要你时发通知
 
 - **触发**沿用 0013 的 Web Push：请求等人（含 policy）、一轮结束、agent 自己退出。
-- **Mac App**：`UNUserNotificationCenter`，在请求等人和一轮结束时发，App 在前台且选中该会话时不发。点通知把 App 拉到前面并选中会话。
+- **Mac App**：`UNUserNotificationCenter`，App 在前台且选中该会话时不发。点通知把 App 拉到前面并选中会话。
+  General 设置里有两个开关：**需要你时**（审批、提问、policy 卡，默认开，带声音）和**一轮结束时**（默认关，无声音；
+  开着二十多个会话时这类横幅太多，真机评审第 4 条）。审批和提问的通知在下一次 `PostToolUse`、新提问、一轮结束时撤掉。
   `UNUserNotificationCenter` 需要 bundle id，只在 `scripts/bundle.sh` 打出来的 .app 里启用，`swift run` 时跳过。通知上的允许/拒绝按钮不进第一版。
 - **服务端 webhook**：`settings.json` 里 `notifications.webhooks` 是一个列表，每项有 `url` 和 `format`（`ntfy`、`telegram`、`json`），
   跟 Web Push 同时发。`ntfy` 把标题放在 `Title` 头、链接放在 `Click` 头、正文是 body；`telegram` POST `sendMessage`，
@@ -155,7 +163,7 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
 - 预算规则只对 Claude 有用，而且数字最多落后一轮。Kiro 不受策略约束。
 - AgentMaster 关着时没有策略、没有卡片、没有通知，agent 跟直接在终端里跑一样。
 - `ServerSettings` 改成容错解码以后，以后加设置项也不会再把旧文件清空。
-- ADR 0013 里"Mac App 不变"一条，审批部分由本 ADR 取代：Mac App 也出卡片。
+- ADR 0013 里"Mac App 不变"一条，由本 ADR 部分取代：Mac App 出 policy 卡；审批和提问仍在终端里答，只多一条通知。
 
 ### 待定问题
 
@@ -194,5 +202,14 @@ AgentMaster 仍然只做真实 agent TUI 上面的一层薄壳，所以这几件
   停止前先让挂起请求过期（S1）；卡片上 Allow 的说明改正（S2）；webhook 按 `id` 合并（S4）；Mac 的审批和提问只等 30 s（S5）；
   settings.json 从创建起就是 600（N1）；调用数规则的理由文字改正（N2 的前一半）；Telegram 只走 https（N3）；
   Mac 在 agent 启动前登记会话（N4）；Mac 缓存解码后的策略（N5）。
-- 还没做：同一会话里几张调用数卡片，批准一张后其余的不会自动重判（N2 的后一半）；
-  Mac 的 30 s 窗口要在真机上确认 Claude Code 挂着 hook 时画不画审批框。
+- 还没做：同一会话里几张调用数卡片，批准一张后其余的不会自动重判（N2 的后一半）。
+
+### 实施记录（2026-11-25，Mac 真机评审）
+
+- 真机（macOS 26.7、Claude Code 2.1.331、Codex 0.169）上 `swift test` 341 个通过；`web-smoke.py --agent claude` 通过；
+  Codex 的 deny 生效，allow 那一轮因 Codex 自己的 exec policy 拒绝 `rm -f` 而失败，改用 `chmod -R 777 doomed`（也是内置规则）后两轮都通过。
+- S5 结案：hook 挂着时 Claude Code 会在终端画自己的审批框。Mac 不再为审批和提问出卡片，删掉 30 s 窗口（`approvalTimeout`）。
+- 按评审改的：理由框回车即拒绝、允许按钮不占回车（1）；Mac 审批和提问只发通知（2）；危险命令规则保持默认打开，加"本会话内允许"，
+  搜索和打印命令参数里的 SQL 不算（3）；Mac 通知两个开关，一轮结束无声音（4）；答完卡片焦点回终端（5）；
+  Policies 页数字框用占位符 "Off" 和带边框的样式（6），清空或填 0 即关闭并保存（7，`PolicySettings.limit(fromText:)`）；
+  卡片上命令只显示一次、按钮加大（8）。网页卡片的理由框是多行文本框，回车只换行，没有第 1 条的问题；命令只显示一次同样改了。

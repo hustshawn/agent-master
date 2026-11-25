@@ -55,9 +55,9 @@ public struct PolicyCheck: Equatable, Sendable {
 /// Every field decodes when missing, so a file written before a field existed keeps the rest.
 public struct PolicySettings: Codable, Equatable, Sendable {
     public struct Cost: Codable, Equatable, Sendable {
-        /// Ask once when the session's cost first reaches this; nil turns it off.
+        /// Ask once when the session's cost first reaches this; nil or 0 turns it off.
         public var askAtUSD: Double?
-        /// Deny every tool call from here on; nil turns it off.
+        /// Deny every tool call from here on; nil or 0 turns it off.
         public var denyAtUSD: Double?
 
         public init(askAtUSD: Double? = nil, denyAtUSD: Double? = nil) {
@@ -154,10 +154,11 @@ public enum PolicyReducer {
         var findings: [PolicyFinding] = []
 
         if let cost = state.costUSD {
-            if let deny = settings.cost.denyAtUSD, cost >= deny {
+            // 0 or less is off, as on the Mac page: a stored 0 must not deny every call.
+            if let deny = settings.cost.denyAtUSD, deny > 0, cost >= deny {
                 findings.append(PolicyFinding(rule: .cost, verdict: .deny, reason:
                     "This session has cost \(dollars(cost)), past its \(dollars(deny)) limit."))
-            } else if let ask = settings.cost.askAtUSD, cost >= ask, !state.budgetApproved {
+            } else if let ask = settings.cost.askAtUSD, ask > 0, cost >= ask, !state.budgetApproved {
                 findings.append(PolicyFinding(rule: .cost, verdict: .ask, reason:
                     "This session has cost \(dollars(cost)), past the \(dollars(ask)) budget."))
             }

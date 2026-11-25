@@ -84,13 +84,22 @@ public enum WebServer {
             return .noContent
         }
         api.put("policies") { request, context -> HTTPResponse.Status in
-            manager.policies = try await request.decode(as: PolicySettings.self, context: context)
+            var body = try await request.decode(as: PolicySettings.self, context: context)
+            // 0 or less is off, as on the Mac page; stored as off so Settings reads it back that way.
+            body.cost.askAtUSD = body.cost.askAtUSD.flatMap { $0 > 0 ? $0 : nil }
+            body.cost.denyAtUSD = body.cost.denyAtUSD.flatMap { $0 > 0 ? $0 : nil }
+            body.maxToolCalls = body.maxToolCalls.flatMap { $0 > 0 ? $0 : nil }
+            manager.policies = body
             return .noContent
         }
         api.put("notifications") { request, context -> HTTPResponse.Status in
             let body = try await request.decode(as: NotificationSettings.self, context: context)
             if let bad = body.webhooks.first(where: { !NotificationSettings.formats.contains($0.format) }) {
                 throw HTTPError(.badRequest, message: "Unknown webhook format \(bad.format); use ntfy, telegram or json.")
+            }
+            // A URL without http(s):// would be saved and then never posted to (WebhookNotifier.request).
+            if body.webhooks.contains(where: { !NotificationSettings.isPostable($0.url) }) {
+                throw HTTPError(.badRequest, message: "A webhook URL must start with http:// or https:// and name a host.")
             }
             if let bad = body.events.first(where: { !NotificationSettings.eventKinds.contains($0) }) {
                 throw HTTPError(.badRequest, message: "Unknown webhook event \(bad); use approval, question, policy, turn or exit.")

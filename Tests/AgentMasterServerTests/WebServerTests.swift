@@ -237,6 +237,35 @@ final class WebServerTests: XCTestCase {
         }
     }
 
+    func testSettingsThatCannotWorkAreRejectedOrTurnedOff() async throws {
+        try await app().test(.router) { client in
+            for url in ["ntfy.sh/topic", "ftp://ntfy.sh/topic", "https://"] {
+                try await client.execute(uri: "/api/notifications", method: .put, headers: self.auth, body: ByteBuffer(string:
+                    #"{"webhooks":[{"url":"\#(url)","format":"ntfy"}]}"#)) { response in
+                    XCTAssertEqual(response.status, .badRequest, url)
+                    XCTAssertTrue(String(buffer: response.body).contains("must start with"), String(buffer: response.body))
+                }
+            }
+            XCTAssertTrue(self.manager.notifications.webhooks.isEmpty)
+            try await client.execute(uri: "/api/notifications", method: .put, headers: self.auth, body: ByteBuffer(string:
+                #"{"webhooks":[{"url":"https://ntfy.sh/topic","format":"ntfy"}],"events":["exit"]}"#)) {
+                XCTAssertEqual($0.status, .noContent)
+            }
+            XCTAssertEqual(self.manager.notifications.events, ["exit"])
+            try await client.execute(uri: "/api/notifications", method: .put, headers: self.auth, body: ByteBuffer(string:
+                #"{"webhooks":[],"events":["everything"]}"#)) {
+                XCTAssertEqual($0.status, .badRequest)
+            }
+            try await client.execute(uri: "/api/policies", method: .put, headers: self.auth, body: ByteBuffer(string:
+                #"{"cost":{"askAtUSD":0,"denyAtUSD":-2},"maxToolCalls":0}"#)) {
+                XCTAssertEqual($0.status, .noContent)
+            }
+            XCTAssertNil(self.manager.policies.cost.askAtUSD, "0 is off, as on the Mac page")
+            XCTAssertNil(self.manager.policies.cost.denyAtUSD)
+            XCTAssertNil(self.manager.policies.maxToolCalls)
+        }
+    }
+
     func testFoldersListsTheServersDirectories() async throws {
         try await app().test(.router) { client in
             try await client.execute(uri: "/api/folders?path=\(self.root.path)", method: .get, headers: self.auth) {

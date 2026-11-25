@@ -43,6 +43,16 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(check("ls", settings, state: &state).verdict, .deny, "every call from here on")
     }
 
+    /// 0 is off, as on the Mac page; a stored 0 from the API must not deny every call.
+    func testACostLimitOfZeroOrLessIsOff() {
+        for limit in [0.0, -1] {
+            let settings = PolicySettings(cost: .init(askAtUSD: limit, denyAtUSD: limit), dangerousBash: .init(enabled: false))
+            var state = PolicyState()
+            PolicyReducer.observeCost(3, in: &state)
+            XCTAssertEqual(check("ls", settings, state: &state).verdict, .allow, "limit \(limit)")
+        }
+    }
+
     func testACostThatStartsOverIsCarried() {
         let settings = PolicySettings(cost: .init(askAtUSD: nil, denyAtUSD: 10), dangerousBash: .init(enabled: false))
         var state = PolicyState()

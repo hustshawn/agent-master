@@ -54,6 +54,14 @@ public struct NotificationSettings: Codable, Equatable, Sendable {
     public static let defaultEvents = ["approval", "question", "policy", "exit"]
     static let mask = "••••"
 
+    /// An http(s) URL with a host, or one still masked (`merging` keeps the stored URL for it).
+    public static func isPostable(_ url: String) -> Bool {
+        if url.contains(mask) { return true }
+        guard let components = URLComponents(string: url), let scheme = components.scheme?.lowercased(),
+              let host = components.host else { return false }
+        return (scheme == "http" || scheme == "https") && !host.isEmpty
+    }
+
     /// The scheme and host only, so Settings can show which service a webhook goes to without its secret.
     public static func masked(_ url: String) -> String {
         guard let components = URLComponents(string: url), let scheme = components.scheme, let host = components.host else {
